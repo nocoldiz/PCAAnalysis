@@ -1,0 +1,6 @@
+@echo off
+echo Starting PCA Analysis CLI...
+start "" python pca-analysis.py
+
+echo Starting PCA Analysis GUI...
+python pca_analysis_gui.py
