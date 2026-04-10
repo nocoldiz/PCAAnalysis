@@ -71,29 +71,41 @@ except ImportError:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Colour palette  (dark GitHub-inspired theme)
+# Colour palette  — Cosmic Indigo design system
 # ═══════════════════════════════════════════════════════════════════════════════
-BG           = "#0f1117"   # Deepest background — main window canvas
-BG_SECONDARY = "#161b22"   # Slightly lighter surface — toolbar, text-box backgrounds
-BG_CARD      = "#1c2333"   # Card / panel surface — axes background, notebook tab body
-BORDER       = "#2a3040"   # Subtle separator lines and spine colour
-TEXT         = "#e6edf3"   # Primary readable text
-TEXT_DIM     = "#7d8590"   # De-emphasised text — labels, axis tick marks
-ACCENT       = "#58a6ff"   # Interactive highlight — active tab, run button, crosshair
-ACCENT_HOVER = "#79c0ff"   # Lighter accent for button hover state
-GREEN        = "#3fb950"   # Positive / success indicator (cumulative variance fill)
-RED          = "#f85149"   # Warning / threshold marker (95 % variance line)
-ORANGE       = "#d29922"   # Secondary data series on variance plot
-PURPLE       = "#bc8cff"   # Unused reserved colour
-CYAN         = "#39d2c0"   # Monospace statistics text
+BG           = "#07070f"   # Void-black root background
+BG_PANEL     = "#0c0c1a"   # Left sidebar / header bar
+BG_CARD      = "#111126"   # Card surfaces (sections, axes)
+BG_ELEVATED  = "#1a1a35"   # Hover / active elevation
+BORDER       = "#252545"   # Subtle dividers and spines
+BORDER_HI    = "#3730a3"   # Accent border (focus ring)
+TEXT         = "#f1f5f9"   # Primary text  (slate-100)
+TEXT_DIM     = "#94a3b8"   # Secondary text (slate-400)
+TEXT_MUTED   = "#475569"   # Tertiary / placeholder (slate-600)
+INDIGO       = "#818cf8"   # Primary accent  (indigo-400)
+INDIGO_DARK  = "#4f46e5"   # Pressed / deep accent
+INDIGO_GLOW  = "#a5b4fc"   # Hover accent
+VIOLET       = "#c084fc"   # Secondary accent (violet)
+TEAL         = "#2dd4bf"   # Tertiary accent  (teal-400)
+GREEN        = "#34d399"   # Success / positive (emerald-400)
+RED          = "#f87171"   # Error / threshold  (red-400)
+ORANGE       = "#fb923c"   # Warning            (orange-400)
+AMBER        = "#fbbf24"   # Highlight          (amber-400)
+CYAN         = "#22d3ee"   # Mono / data text   (cyan-400)
+PURPLE       = "#c084fc"   # Purple alias (kept for compatibility)
 
-# Six distinct colours cycled across class scatter points and Raman traces
-PLOT_COLORS = ["#ff6b6b", "#51cf66", "#339af0", "#fcc419", "#cc5de8", "#22b8cf"]
+# Backward-compat aliases used in plot helpers
+ACCENT       = INDIGO
+ACCENT_HOVER = INDIGO_GLOW
+BG_SECONDARY = BG_PANEL
 
-# Two discrete colormaps used as semi-transparent fills in the decision-boundary panels
+# Six perceptually distinct colours for scatter / Raman trace cycling
+PLOT_COLORS = ["#f87171", "#34d399", "#818cf8", "#fbbf24", "#c084fc", "#22d3ee"]
+
+# Decision-boundary colormaps (semi-transparent fills)
 PLOT_CMAPS = [
-    ListedColormap(["#ffd43b", "#f8f9fa", "#96f2d7"]),  # Warm palette — training panel
-    ListedColormap(["#ffa8a8", "#d0ebff", "#b2f2bb"]),  # Cool palette — test panel
+    ListedColormap(["#fbbf24", "#f1f5f9", "#34d399"]),
+    ListedColormap(["#f87171", "#dbeafe", "#a7f3d0"]),
 ]
 
 # ── CPK element properties used by the 3-D molecular viewer ───────────────────
@@ -692,417 +704,403 @@ class PCAApp(tk.Tk):
         self.raman_wavenumbers = None   # Shape (n_wn,) — shared x-axis for all spectra
         self.raman_spectra     = None   # Shape (n_spectra, n_wn) — raw intensity matrix
         self.raman_processed   = None   # Shape (n_spectra, n_wn) after noise/coating; None=raw
-        self.raman_labels      = None   # Length n_spectra — material name per row
-        self.raman_ax          = None   # Active Axes object; None before first plot
-        self._raman_vline      = None   # Dashed vertical line that follows the cursor
-        self._coating_vars     = {}     # Populated in _build_controls: name → BooleanVar
+        self.raman_labels      = None
+        self.raman_ax          = None
+        self._raman_vline      = None
+        self._coating_vars     = {}
+        self._last_mol_key     = None   # tracks last rendered molecule for export
 
-        self._build_styles()   # Define all ttk style overrides for the dark theme
-        self._build_layout()   # Construct and place all widgets
+        # ── UI status ─────────────────────────────────────────────────────────
+        self.status_var   = tk.StringVar(value="Ready")
+        self._hover_btns  = []   # (widget, normal_bg) for hover restore
+
+        self._build_styles()
+        self._build_layout()
 
     # ══════════════════════════════════════════════════════════════════════════
     # Styling
     # ══════════════════════════════════════════════════════════════════════════
 
     def _build_styles(self):
-        """Configure all ttk Style rules to implement the dark theme.
-
-        Uses the 'clam' base theme (available on all platforms) and overrides
-        colours and fonts for every widget class used in the application.
-        Named styles (e.g. 'Accent.TButton') can be referenced by name in
-        widget constructors.
-        """
+        """Configure ttk Style rules for the Cosmic Indigo theme."""
         style = ttk.Style(self)
-        style.theme_use("clam")   # 'clam' exposes the most colour-override options
+        style.theme_use("clam")
 
-        # ── Global defaults applied to all widgets ────────────────────────────
         style.configure(".", background=BG, foreground=TEXT, font=("Segoe UI", 10))
+        style.configure("TFrame",       background=BG)
+        style.configure("Panel.TFrame", background=BG_PANEL)
+        style.configure("Card.TFrame",  background=BG_CARD)
 
-        # ── Frame variants ────────────────────────────────────────────────────
-        style.configure("TFrame",      background=BG)       # Standard transparent frame
-        style.configure("Card.TFrame", background=BG_CARD)  # Elevated card surface
+        style.configure("TLabel",         background=BG,       foreground=TEXT,     font=("Segoe UI", 10))
+        style.configure("Panel.TLabel",   background=BG_PANEL, foreground=TEXT,     font=("Segoe UI", 10))
+        style.configure("Card.TLabel",    background=BG_CARD,  foreground=TEXT,     font=("Segoe UI", 10))
+        style.configure("Header.TLabel",  background=BG_PANEL, foreground=INDIGO,   font=("Segoe UI", 13, "bold"))
+        style.configure("Dim.TLabel",     background=BG_CARD,  foreground=TEXT_DIM, font=("Segoe UI", 9))
+        style.configure("PanelDim.TLabel",background=BG_PANEL, foreground=TEXT_DIM, font=("Segoe UI", 9))
+        style.configure("Stat.TLabel",    background=BG_CARD,  foreground=CYAN,     font=("Consolas", 9))
 
-        # ── Label variants ────────────────────────────────────────────────────
-        style.configure("TLabel",      background=BG, foreground=TEXT,    font=("Segoe UI", 10))
-        style.configure("Header.TLabel", font=("Segoe UI", 13, "bold"),   foreground=ACCENT)
-        style.configure("Dim.TLabel",  foreground=TEXT_DIM,               font=("Segoe UI", 9))
-        style.configure("Stat.TLabel", font=("Consolas", 11),             foreground=CYAN)
+        # Buttons
+        style.configure("TButton",       background=BG_ELEVATED, foreground=TEXT,  font=("Segoe UI", 9), padding=(10, 5), borderwidth=0, relief="flat")
+        style.map("TButton",             background=[("active", BG_ELEVATED), ("pressed", BORDER_HI)])
+        style.configure("Accent.TButton",background=INDIGO_DARK, foreground=TEXT,  font=("Segoe UI", 10, "bold"), padding=(14, 8), borderwidth=0, relief="flat")
+        style.map("Accent.TButton",      background=[("active", INDIGO), ("disabled", BORDER)], foreground=[("disabled", TEXT_MUTED)])
 
-        # ── Primary accent button (Run PCA) ───────────────────────────────────
-        style.configure(
-            "Accent.TButton",
-            background=ACCENT,                  # Blue fill when idle
-            foreground="#000",                  # Black text for contrast on blue
-            font=("Segoe UI", 10, "bold"),
-            padding=(16, 8),                    # Extra horizontal padding
-        )
-        style.map(
-            "Accent.TButton",
-            background=[("active", ACCENT_HOVER), ("disabled", BORDER)],   # State-dependent fill
-            foreground=[("disabled", TEXT_DIM)],                            # Grey text when disabled
-        )
+        # Combobox / Spinbox
+        style.configure("TCombobox",     fieldbackground=BG_ELEVATED, background=BG_CARD, foreground=TEXT, selectbackground=INDIGO_DARK, selectforeground=TEXT, arrowcolor=TEXT_DIM)
+        style.map("TCombobox",           fieldbackground=[("readonly", BG_ELEVATED)])
+        style.configure("TSpinbox",      fieldbackground=BG_ELEVATED, background=BG_CARD, foreground=TEXT, arrowcolor=TEXT_DIM)
 
-        # ── Secondary button (Load, Export) ───────────────────────────────────
-        style.configure(
-            "TButton",
-            background=BG_SECONDARY,
-            foreground=TEXT,
-            font=("Segoe UI", 10),
-            padding=(12, 6),
-            borderwidth=1,
-        )
-        style.map("TButton", background=[("active", BG_CARD)])   # Subtle hover lightening
+        # Checkbutton
+        style.configure("TCheckbutton",  background=BG_CARD, foreground=TEXT_DIM,  font=("Segoe UI", 9), indicatorbackground=BG_ELEVATED, indicatorforeground=INDIGO)
+        style.map("TCheckbutton",        background=[("active", BG_CARD)], foreground=[("active", TEXT)])
 
-        # ── Combobox ──────────────────────────────────────────────────────────
-        style.configure(
-            "TCombobox",
-            fieldbackground=BG_SECONDARY,   # Text-field area background
-            background=BG_CARD,             # Dropdown arrow button background
-            foreground=TEXT,
-            selectbackground=ACCENT,        # Highlighted selection fill
-            selectforeground="#000",
-        )
-        style.map("TCombobox", fieldbackground=[("readonly", BG_SECONDARY)])
+        # Notebook — sleek pill-style tabs
+        style.configure("TNotebook",     background=BG_PANEL, borderwidth=0, tabmargins=0)
+        style.configure("TNotebook.Tab", background=BG_PANEL, foreground=TEXT_MUTED, padding=(16, 7), font=("Segoe UI", 9), borderwidth=0)
+        style.map("TNotebook.Tab",       background=[("selected", BG_CARD)], foreground=[("selected", INDIGO)], font=[("selected", ("Segoe UI", 9, "bold"))])
 
-        # ── Spinbox ───────────────────────────────────────────────────────────
-        style.configure(
-            "TSpinbox",
-            fieldbackground=BG_SECONDARY,
-            background=BG_CARD,
-            foreground=TEXT,
-            arrowcolor=TEXT,
-        )
+        # Scrollbar
+        style.configure("TScrollbar",    background=BG_ELEVATED, troughcolor=BG_PANEL, arrowcolor=TEXT_MUTED, borderwidth=0, relief="flat")
 
-        # ── Notebook (tabbed pane) ────────────────────────────────────────────
-        style.configure("TNotebook", background=BG, borderwidth=0)
-        style.configure(
-            "TNotebook.Tab",
-            background=BG_SECONDARY,    # Inactive tab background
-            foreground=TEXT_DIM,        # Inactive tab text
-            padding=(14, 6),
-            font=("Segoe UI", 10),
-        )
-        style.map(
-            "TNotebook.Tab",
-            background=[("selected", BG_CARD)],     # Active tab brightens
-            foreground=[("selected", ACCENT)],       # Active tab text becomes accent blue
-        )
-
-        # ── Progress bar ──────────────────────────────────────────────────────
-        style.configure("Horizontal.TProgressbar", background=ACCENT, troughcolor=BG_SECONDARY)
+        # Progress bar
+        style.configure("Horizontal.TProgressbar", background=INDIGO, troughcolor=BG_ELEVATED, borderwidth=0)
 
     # ══════════════════════════════════════════════════════════════════════════
     # Layout construction
     # ══════════════════════════════════════════════════════════════════════════
 
     def _build_layout(self):
-        """Build the top-level window structure: title bar, separator, paned area."""
-        # ── Title bar ─────────────────────────────────────────────────────────
-        title_frame = ttk.Frame(self)
-        title_frame.pack(fill="x", padx=16, pady=(12, 4))   # Horizontal strip at top
-        ttk.Label(
-            title_frame, text="◆  PCA Analysis Tool",
-            font=("Segoe UI", 16, "bold"), foreground=ACCENT,
-        ).pack(side="left")
-        ttk.Label(
-            title_frame,
-            text="Principal Component Analysis with Python",
-            style="Dim.TLabel",
-        ).pack(side="left", padx=(12, 0))   # Subtitle placed to the right of the title
+        """Build root structure: header bar → split pane → status bar."""
 
-        # ── Horizontal separator line ─────────────────────────────────────────
-        sep = tk.Frame(self, height=1, bg=BORDER)   # 1-pixel-tall rule
-        sep.pack(fill="x", padx=16, pady=(4, 8))
+        # ── Header bar ────────────────────────────────────────────────────────
+        hdr = tk.Frame(self, bg=BG_PANEL, height=52)
+        hdr.pack(fill="x")
+        hdr.pack_propagate(False)
 
-        # ── Resizable left/right pane ─────────────────────────────────────────
-        main = ttk.PanedWindow(self, orient="horizontal")   # Draggable sash between panels
-        main.pack(fill="both", expand=True, padx=12, pady=(0, 12))
+        # Logo
+        logo = tk.Frame(hdr, bg=BG_PANEL)
+        logo.pack(side="left", padx=18, pady=0)
+        tk.Label(logo, text="◆", bg=BG_PANEL, fg=INDIGO,
+                 font=("Segoe UI", 20, "bold")).pack(side="left", pady=10)
+        tk.Label(logo, text="  PCA Analysis Tool", bg=BG_PANEL, fg=TEXT,
+                 font=("Segoe UI", 14, "bold")).pack(side="left")
+        tk.Label(logo, text="  v2.0", bg=BG_PANEL, fg=TEXT_MUTED,
+                 font=("Segoe UI", 9)).pack(side="left", pady=(12, 0))
 
-        left = ttk.Frame(main, width=340)   # Control panel; fixed initial width
-        main.add(left, weight=0)            # weight=0 means left pane does not expand
-        self._build_controls(left)          # Populate left panel with controls
+        # Export buttons (right side of header)
+        exp = tk.Frame(hdr, bg=BG_PANEL)
+        exp.pack(side="right", padx=16)
+        tk.Label(exp, text="EXPORT", bg=BG_PANEL, fg=TEXT_MUTED,
+                 font=("Segoe UI", 7, "bold")).pack(side="left", padx=(0, 6), pady=18)
+        for label, cmd, fg in [
+            ("⬡  PDF",  self._export_pdf,  VIOLET),
+            ("⬡  CSV",  self._export_csv,  TEAL),
+            ("⬡  PNG",  self._export_png,  GREEN),
+        ]:
+            b = tk.Button(exp, text=label, command=cmd, bg=BG_CARD, fg=fg,
+                          font=("Segoe UI", 9, "bold"), relief="flat",
+                          padx=14, pady=5, cursor="hand2", bd=0,
+                          activebackground=BG_ELEVATED, activeforeground=fg)
+            b.pack(side="left", padx=3, pady=12)
 
-        right = ttk.Frame(main)             # Results area; expands to fill available space
-        main.add(right, weight=1)           # weight=1 means right pane absorbs extra width
-        self._build_results(right)          # Populate right panel with tabs and plots
+        # ── Accent separator ──────────────────────────────────────────────────
+        tk.Frame(self, bg=INDIGO_DARK, height=1).pack(fill="x")
+
+        # ── Status bar (bottom) ───────────────────────────────────────────────
+        sbar = tk.Frame(self, bg=BG_PANEL, height=26)
+        sbar.pack(side="bottom", fill="x")
+        sbar.pack_propagate(False)
+        tk.Frame(sbar, bg=INDIGO_DARK, width=2).pack(side="left", fill="y")
+        self.status_label = tk.Label(
+            sbar, textvariable=self.status_var,
+            bg=BG_PANEL, fg=TEXT_MUTED,
+            font=("Consolas", 8), padx=10, anchor="w",
+        )
+        self.status_label.pack(side="left", fill="y")
+        tk.Label(sbar, text="Cosmic Indigo  ◆", bg=BG_PANEL, fg=TEXT_MUTED,
+                 font=("Segoe UI", 8), padx=12).pack(side="right")
+
+        # ── Main paned area ───────────────────────────────────────────────────
+        main = ttk.PanedWindow(self, orient="horizontal")
+        main.pack(fill="both", expand=True)
+
+        left = tk.Frame(main, bg=BG_PANEL, width=328)
+        main.add(left, weight=0)
+        self._build_controls(left)
+
+        right = ttk.Frame(main)
+        main.add(right, weight=1)
+        self._build_results(right)
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # Control panel helpers
+    # ══════════════════════════════════════════════════════════════════════════
+
+    def _card(self, parent, title, icon="", color=None):
+        """Return a content frame inside a styled card with a colored left stripe.
+
+        Creates:  [3px stripe | header row | content frame]
+        The card lives inside *parent* (the scrollable panel).
+        """
+        color = color or INDIGO
+        wrap = tk.Frame(parent, bg=BG_PANEL)
+        wrap.pack(fill="x", padx=8, pady=(0, 6))
+        tk.Frame(wrap, bg=color, width=3).pack(side="left", fill="y")
+        body = tk.Frame(wrap, bg=BG_CARD)
+        body.pack(side="left", fill="both", expand=True)
+        if title:
+            hf = tk.Frame(body, bg=BG_CARD)
+            hf.pack(fill="x", padx=10, pady=(7, 0))
+            lbl_text = f"{icon}  {title}" if icon else title
+            tk.Label(hf, text=lbl_text, bg=BG_CARD, fg=color,
+                     font=("Segoe UI", 8, "bold")).pack(side="left")
+        content = tk.Frame(body, bg=BG_CARD)
+        content.pack(fill="both", expand=True, padx=10, pady=(4, 10))
+        return content
+
+    def _flat_btn(self, parent, text, command, fg=None, bg=None):
+        """Return a flat tk.Button styled for the card theme."""
+        fg  = fg  or TEXT_DIM
+        bg  = bg  or BG_ELEVATED
+        btn = tk.Button(
+            parent, text=text, command=command,
+            bg=bg, fg=fg, activebackground=BG_ELEVATED, activeforeground=fg,
+            relief="flat", bd=0, font=("Segoe UI", 9),
+            padx=10, pady=5, cursor="hand2",
+        )
+        btn.bind("<Enter>", lambda e: btn.config(bg=BG_ELEVATED if bg == BG_CARD else BG_CARD))
+        btn.bind("<Leave>", lambda e: btn.config(bg=bg))
+        return btn
+
+    def _lbl(self, parent, text, dim=False):
+        """Compact label factory for card interiors."""
+        fg = TEXT_DIM if dim else TEXT
+        return tk.Label(parent, text=text, bg=BG_CARD, fg=fg, font=("Segoe UI", 9), anchor="w")
+
+    def _combo(self, parent, var, values, width=28):
+        """Return a ttk.Combobox with card styling."""
+        c = ttk.Combobox(parent, textvariable=var, state="readonly",
+                         width=width, values=values)
+        return c
+
+    def _scale(self, parent, var, from_, to, res):
+        return tk.Scale(
+            parent, variable=var, from_=from_, to=to, resolution=res,
+            orient="horizontal", bg=BG_CARD, fg=TEXT_DIM,
+            troughcolor=BG_ELEVATED, highlightthickness=0,
+            sliderrelief="flat", activebackground=INDIGO,
+            font=("Consolas", 8), showvalue=True,
+        )
+
+    def _check(self, parent, text, var, command=None):
+        kw = {"command": command} if command else {}
+        return ttk.Checkbutton(parent, text=text, variable=var,
+                               style="TCheckbutton", **kw)
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # Control panel build
+    # ══════════════════════════════════════════════════════════════════════════
 
     def _build_controls(self, parent):
-        """Build the scrollable left panel containing all input controls.
+        """Build the scrollable left panel with card-based sections."""
+        # Scrollable canvas
+        cv = tk.Canvas(parent, bg=BG_PANEL, highlightthickness=0, width=328)
+        sb = ttk.Scrollbar(parent, orient="vertical", command=cv.yview)
+        sf = tk.Frame(cv, bg=BG_PANEL)
+        sf.bind("<Configure>", lambda e: cv.configure(scrollregion=cv.bbox("all")))
+        cv.create_window((0, 0), window=sf, anchor="nw", width=316)
+        cv.configure(yscrollcommand=sb.set)
+        cv.pack(side="left", fill="both", expand=True)
+        sb.pack(side="right", fill="y")
+        cv.bind_all("<MouseWheel>",
+                    lambda e: cv.yview_scroll(int(-1 * e.delta / 120), "units"))
 
-        The panel uses a Canvas + Scrollbar pattern to allow the control list to
-        grow beyond the panel height without clipping.  All actual control widgets
-        are parented to *scroll_frame* (which is embedded in the canvas).
+        p = sf  # alias
 
-        Parameters
-        ----------
-        parent : ttk.Frame — the left pane of the main PanedWindow
-        """
-        # ── Scrollable canvas + scrollbar setup ───────────────────────────────
-        canvas    = tk.Canvas(parent, bg=BG, highlightthickness=0, width=320)
-        scrollbar = ttk.Scrollbar(parent, orient="vertical", command=canvas.yview)
-        scroll_frame = ttk.Frame(canvas)   # All controls live inside this frame
+        # ── Top spacer ────────────────────────────────────────────────────────
+        tk.Frame(p, bg=BG_PANEL, height=8).pack(fill="x")
 
-        # Resize the canvas scroll-region when the frame's content changes height
-        scroll_frame.bind(
-            "<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all")),
-        )
-        # Embed scroll_frame at the top-left corner of the canvas
-        canvas.create_window((0, 0), window=scroll_frame, anchor="nw", width=310)
-        canvas.configure(yscrollcommand=scrollbar.set)   # Link scrollbar to canvas
+        # ══ CARD: DATA SOURCE ════════════════════════════════════════════════
+        c = self._card(p, "DATA SOURCE", "◈", INDIGO)
 
-        canvas.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
+        self._lbl(c, "Dataset preset").pack(anchor="w", pady=(0, 3))
+        self.preset_var = tk.StringVar(value="── select preset ──")
+        cb = self._combo(c, self.preset_var, [
+            "── select preset ──",
+            "Iris  (4 features · 3 classes)",
+            "Wine  (13 features · 3 classes)",
+            "Breast Cancer  (30 features · 2 classes)",
+            "Random Blobs  (5 features · 4 classes)",
+            "Random Circles  (2 features · 2 classes)",
+        ])
+        cb.pack(fill="x", pady=(0, 6))
+        cb.bind("<<ComboboxSelected>>", self._on_preset_selected)
 
-        # Translate mouse-wheel delta (120 units per notch on Windows) into scroll units
-        def _on_mousewheel(event):
-            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-        canvas.bind_all("<MouseWheel>", _on_mousewheel)   # Global binding (no focus needed)
+        self._flat_btn(c, "  Load CSV file", self._load_csv,
+                       fg=INDIGO, bg=BG_CARD).pack(fill="x")
 
-        p = scroll_frame   # Shorthand alias used throughout this method
-
-        # ── Section: Data Source ──────────────────────────────────────────────
-        self._section(p, "DATA SOURCE")
-
-        ttk.Label(p, text="Preset Dataset").pack(anchor="w", padx=8, pady=(4, 2))
-        self.preset_var = tk.StringVar(value="-- Select Preset --")   # Tracks combobox selection
-        presets = ttk.Combobox(
-            p, textvariable=self.preset_var, state="readonly", width=34,
-            values=[
-                "-- Select Preset --",
-                "Iris (4 features, 3 classes)",
-                "Wine (13 features, 3 classes)",
-                "Breast Cancer (30 features, 2 classes)",
-                "Random Blobs (5 features, 4 classes)",
-                "Random Circles (2 features, 2 classes)",
-            ],
-        )
-        presets.pack(padx=8, pady=2, fill="x")
-        presets.bind("<<ComboboxSelected>>", self._on_preset_selected)   # Fire on selection change
-
-        ttk.Label(p, text="─ or ─", foreground=TEXT_DIM, font=("Segoe UI", 9)).pack(pady=4)
-        ttk.Button(p, text="📂  Load CSV File", command=self._load_csv).pack(padx=8, fill="x")
-
-        # Dynamic label that updates after data is loaded
         self.data_info_var = tk.StringVar(value="No data loaded")
-        ttk.Label(
-            p, textvariable=self.data_info_var,
-            style="Dim.TLabel", wraplength=280,
-        ).pack(padx=8, pady=(6, 2), anchor="w")
+        tk.Label(c, textvariable=self.data_info_var, bg=BG_CARD, fg=TEXT_MUTED,
+                 font=("Segoe UI", 8), anchor="w", wraplength=260).pack(anchor="w", pady=(6, 0))
 
-        # ── Section: PCA Parameters ───────────────────────────────────────────
-        self._section(p, "PCA PARAMETERS")
+        # ══ CARD: PCA PARAMETERS ════════════════════════════════════════════
+        c = self._card(p, "PCA PARAMETERS", "◈", TEAL)
 
-        ttk.Label(p, text="Number of Components").pack(anchor="w", padx=8, pady=(4, 2))
-        self.n_components_var = tk.IntVar(value=2)   # Default to 2-D projection
-        spin = ttk.Spinbox(p, from_=1, to=50, textvariable=self.n_components_var, width=8)
-        spin.pack(anchor="w", padx=8)
+        row = tk.Frame(c, bg=BG_CARD)
+        row.pack(fill="x", pady=(0, 6))
+        self._lbl(row, "Components").pack(side="left")
+        self.n_components_var = tk.IntVar(value=2)
+        ttk.Spinbox(row, from_=1, to=50, textvariable=self.n_components_var,
+                    width=5, style="TSpinbox").pack(side="right")
 
-        ttk.Label(p, text="Test Split Ratio").pack(anchor="w", padx=8, pady=(8, 2))
-        self.test_ratio_var = tk.DoubleVar(value=0.2)   # 20 % held-out test set by default
-        ratio_frame = ttk.Frame(p)
-        ratio_frame.pack(fill="x", padx=8)
-        self.ratio_scale = tk.Scale(
-            ratio_frame, from_=0.05, to=0.5, resolution=0.05,
-            orient="horizontal", variable=self.test_ratio_var,
-            bg=BG, fg=TEXT, troughcolor=BG_SECONDARY,
-            highlightthickness=0, sliderrelief="flat",
-            activebackground=ACCENT, font=("Consolas", 9),
-        )
-        self.ratio_scale.pack(fill="x")
+        self._lbl(c, "Test split ratio").pack(anchor="w", pady=(2, 2))
+        self.test_ratio_var = tk.DoubleVar(value=0.2)
+        self._scale(c, self.test_ratio_var, 0.05, 0.5, 0.05).pack(fill="x")
 
-        # Standardisation is strongly recommended for PCA; enabled by default
         self.standardize_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(
-            p, text="Standardize features (recommended)",
-            variable=self.standardize_var,
-        ).pack(anchor="w", padx=8, pady=(6, 0))
+        self._check(c, "Standardize features  (recommended)",
+                    self.standardize_var).pack(anchor="w", pady=(6, 2))
 
-        # Logistic Regression on the PCA-projected space; optional
         self.classify_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(
-            p, text="Run Logistic Regression classifier",
-            variable=self.classify_var,
-        ).pack(anchor="w", padx=8, pady=(2, 0))
+        self._check(c, "Run Logistic Regression classifier",
+                    self.classify_var).pack(anchor="w")
 
-        # ── Section: Raman Data ───────────────────────────────────────────────
-        self._section(p, "RAMAN DATA")
+        # ══ CARD: RAMAN DATA ════════════════════════════════════════════════
+        c = self._card(p, "RAMAN DATA", "◈", VIOLET)
 
-        ttk.Label(p, text="Raman Preset").pack(anchor="w", padx=8, pady=(4, 2))
-        self.raman_preset_var = tk.StringVar(value="-- Select Raman Preset --")
-        raman_combo = ttk.Combobox(
-            p, textvariable=self.raman_preset_var, state="readonly", width=34,
-            values=["-- Select Raman Preset --"] + list(RAMAN_PRESETS.keys()),
-        )
-        raman_combo.pack(padx=8, pady=2, fill="x")
-        raman_combo.bind("<<ComboboxSelected>>", self._on_raman_preset_selected)
+        self._lbl(c, "Spectral preset").pack(anchor="w", pady=(0, 3))
+        self.raman_preset_var = tk.StringVar(value="── select preset ──")
+        rcb = self._combo(c, self.raman_preset_var,
+                          ["── select preset ──"] + list(RAMAN_PRESETS.keys()))
+        rcb.pack(fill="x", pady=(0, 6))
+        rcb.bind("<<ComboboxSelected>>", self._on_raman_preset_selected)
 
-        ttk.Label(p, text="─ or ─", foreground=TEXT_DIM, font=("Segoe UI", 9)).pack(pady=4)
-        ttk.Button(p, text="📂  Load Raman CSV", command=self._load_raman_csv).pack(padx=8, fill="x")
+        self._flat_btn(c, "  Load Raman CSV", self._load_raman_csv,
+                       fg=VIOLET, bg=BG_CARD).pack(fill="x", pady=(0, 8))
 
-        # Normalise: rescale each spectrum so its maximum intensity equals 1
         self.raman_normalize_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(
-            p, text="Normalize spectra (max = 1)",
-            variable=self.raman_normalize_var,
-            command=self._plot_raman_spectra,   # Re-draw immediately on toggle
-        ).pack(anchor="w", padx=8, pady=(8, 0))
+        self._check(c, "Normalize spectra  (max = 1)",
+                    self.raman_normalize_var,
+                    command=self._plot_raman_spectra).pack(anchor="w", pady=(0, 2))
 
-        # Stack: add a vertical offset proportional to class index so overlapping
-        # spectra can be distinguished without normalisation
         self.raman_stack_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(
-            p, text="Stack with vertical offset",
-            variable=self.raman_stack_var,
-            command=self._plot_raman_spectra,   # Re-draw immediately on toggle
-        ).pack(anchor="w", padx=8, pady=(2, 4))
+        self._check(c, "Stack with vertical offset",
+                    self.raman_stack_var,
+                    command=self._plot_raman_spectra).pack(anchor="w", pady=(0, 6))
 
-        ttk.Button(
-            p, text="🔍  Identify Crystal Structure",
-            command=self._identify_crystal_structure,
-        ).pack(padx=8, pady=(2, 4), fill="x")
+        self._flat_btn(c, "  Identify Crystal Structure",
+                       self._identify_crystal_structure,
+                       fg=AMBER, bg=BG_CARD).pack(fill="x")
 
-        # ── Section: Signal Processing ────────────────────────────────────────
-        self._section(p, "SIGNAL PROCESSING")
+        # ══ CARD: SIGNAL PROCESSING ═════════════════════════════════════════
+        c = self._card(p, "SIGNAL PROCESSING", "◈", ORANGE)
 
-        # ─ Noise reduction ─
-        ttk.Label(p, text="Noise Reduction", font=("Segoe UI", 9, "bold"),
-                  foreground=TEXT_DIM).pack(anchor="w", padx=8, pady=(6, 2))
-
-        ttk.Label(p, text="Method").pack(anchor="w", padx=8)
+        self._lbl(c, "Noise reduction method", dim=True).pack(anchor="w", pady=(0, 2))
         self.noise_method_var = tk.StringVar(value="Savitzky-Golay")
-        noise_combo = ttk.Combobox(
-            p, textvariable=self.noise_method_var, state="readonly", width=24,
-            values=NOISE_METHODS,
-        )
-        noise_combo.pack(padx=8, pady=2, fill="x")
+        self._combo(c, self.noise_method_var, NOISE_METHODS).pack(fill="x", pady=(0, 4))
 
-        # Window/kernel size — must be odd for SG and median filters
-        win_row = ttk.Frame(p)
-        win_row.pack(fill="x", padx=8, pady=2)
-        ttk.Label(win_row, text="Window size:").pack(side="left")
-        self.noise_window_var = tk.IntVar(value=11)   # 11-point default is gentle
-        ttk.Spinbox(
-            win_row, from_=3, to=101, increment=2,    # Increment by 2 to keep odd values
-            textvariable=self.noise_window_var, width=6,
-        ).pack(side="left", padx=(6, 0))
+        wr = tk.Frame(c, bg=BG_CARD)
+        wr.pack(fill="x", pady=(0, 4))
+        self._lbl(wr, "Window size").pack(side="left")
+        self.noise_window_var = tk.IntVar(value=11)
+        ttk.Spinbox(wr, from_=3, to=101, increment=2,
+                    textvariable=self.noise_window_var, width=5).pack(side="right")
 
-        nr_row = ttk.Frame(p)
-        nr_row.pack(fill="x", padx=8, pady=(2, 4))
-        ttk.Button(nr_row, text="Apply Noise Reduction",
-                   command=self._apply_noise_reduction).pack(side="left", fill="x", expand=True)
+        self._flat_btn(c, "  Apply Noise Reduction",
+                       self._apply_noise_reduction,
+                       fg=ORANGE, bg=BG_CARD).pack(fill="x", pady=(0, 8))
 
-        # ─ Coating simulation ─
-        ttk.Label(p, text="Coating Simulation", font=("Segoe UI", 9, "bold"),
-                  foreground=TEXT_DIM).pack(anchor="w", padx=8, pady=(8, 2))
+        # Separator
+        tk.Frame(c, bg=BORDER, height=1).pack(fill="x", pady=(0, 8))
 
-        # One checkbox per coating; stored in self._coating_vars for iteration
+        self._lbl(c, "Coating simulation", dim=True).pack(anchor="w", pady=(0, 4))
         for coat_name in COATING_CATALOGUE:
             var = tk.BooleanVar(value=False)
             self._coating_vars[coat_name] = var
-            ttk.Checkbutton(p, text=coat_name, variable=var).pack(anchor="w", padx=12)
+            self._check(c, coat_name, var).pack(anchor="w", pady=1)
 
-        # Thickness slider — scales the coating peak amplitude (0 = off, 1 = full)
-        ttk.Label(p, text="Coating thickness (0–1)").pack(anchor="w", padx=8, pady=(8, 0))
+        self._lbl(c, "Thickness").pack(anchor="w", pady=(8, 2))
         self.coat_thickness_var = tk.DoubleVar(value=0.3)
-        tk.Scale(
-            p, from_=0.0, to=1.0, resolution=0.05, orient="horizontal",
-            variable=self.coat_thickness_var,
-            bg=BG, fg=TEXT, troughcolor=BG_SECONDARY,
-            highlightthickness=0, sliderrelief="flat",
-            activebackground=ACCENT, font=("Consolas", 9),
-        ).pack(fill="x", padx=8)
+        self._scale(c, self.coat_thickness_var, 0.0, 1.0, 0.05).pack(fill="x")
 
-        # Attenuation slider — fraction of substrate signal blocked by the coating
-        ttk.Label(p, text="Substrate attenuation (0–0.9)").pack(anchor="w", padx=8, pady=(6, 0))
+        self._lbl(c, "Substrate attenuation").pack(anchor="w", pady=(6, 2))
         self.coat_attenuation_var = tk.DoubleVar(value=0.2)
-        tk.Scale(
-            p, from_=0.0, to=0.9, resolution=0.05, orient="horizontal",
-            variable=self.coat_attenuation_var,
-            bg=BG, fg=TEXT, troughcolor=BG_SECONDARY,
-            highlightthickness=0, sliderrelief="flat",
-            activebackground=ACCENT, font=("Consolas", 9),
-        ).pack(fill="x", padx=8)
+        self._scale(c, self.coat_attenuation_var, 0.0, 0.9, 0.05).pack(fill="x")
 
-        coat_row = ttk.Frame(p)
-        coat_row.pack(fill="x", padx=8, pady=(4, 2))
-        ttk.Button(coat_row, text="Apply Coating",
-                   command=self._apply_coating_simulation).pack(side="left", fill="x", expand=True, padx=(0, 2))
-        ttk.Button(coat_row, text="Reset",
-                   command=self._reset_processing).pack(side="left", fill="x", expand=True)
+        br = tk.Frame(c, bg=BG_CARD)
+        br.pack(fill="x", pady=(8, 0))
+        self._flat_btn(br, "  Apply Coating",
+                       self._apply_coating_simulation,
+                       fg=ORANGE, bg=BG_CARD).pack(side="left", fill="x", expand=True, padx=(0, 4))
+        self._flat_btn(br, "⟳ Reset",
+                       self._reset_processing,
+                       fg=TEXT_DIM, bg=BG_CARD).pack(side="left", fill="x", expand=True)
 
-        # ── Section: Run button + progress bar ────────────────────────────────
-        self._section(p, "")   # Empty title = just a horizontal rule
-        self.run_btn = ttk.Button(
-            p, text="▶  Run PCA Analysis",
-            style="Accent.TButton", command=self._run_analysis,
+        # ══ RUN BUTTON ═══════════════════════════════════════════════════════
+        tk.Frame(p, bg=BG_PANEL, height=4).pack(fill="x")
+        run_wrap = tk.Frame(p, bg=BG_PANEL)
+        run_wrap.pack(fill="x", padx=8, pady=(0, 6))
+
+        self.run_btn = tk.Button(
+            run_wrap, text="▶   Run PCA Analysis",
+            command=self._run_analysis,
+            bg=INDIGO_DARK, fg=TEXT, activebackground=INDIGO,
+            activeforeground=TEXT, relief="flat", bd=0,
+            font=("Segoe UI", 11, "bold"), padx=16, pady=10, cursor="hand2",
         )
-        self.run_btn.pack(padx=8, pady=4, fill="x")
+        self.run_btn.pack(fill="x")
+        self.progress = ttk.Progressbar(run_wrap, mode="indeterminate",
+                                        style="Horizontal.TProgressbar")
+        self.progress.pack(fill="x", pady=(4, 0))
 
-        # Indeterminate progress bar (spinning) shown while PCA runs on thread
-        self.progress = ttk.Progressbar(p, mode="indeterminate", style="Horizontal.TProgressbar")
-        self.progress.pack(padx=8, fill="x", pady=(0, 4))
-
-        # ── Section: Results summary text box ─────────────────────────────────
-        self._section(p, "RESULTS SUMMARY")
+        # ══ CARD: RESULTS SUMMARY ════════════════════════════════════════════
+        c = self._card(p, "RESULTS SUMMARY", "◈", CYAN)
         self.stats_text = tk.Text(
-            p, height=14,
-            bg=BG_SECONDARY, fg=CYAN,            # Monospace cyan text on dark background
-            font=("Consolas", 9), relief="flat", bd=0,
-            insertbackground=CYAN,               # Cursor colour
-            selectbackground=ACCENT,
-            wrap="word", padx=8, pady=6,
+            c, height=15,
+            bg=BG_ELEVATED, fg=CYAN,
+            font=("Consolas", 8), relief="flat", bd=0,
+            insertbackground=CYAN, selectbackground=INDIGO_DARK,
+            wrap="word", padx=8, pady=8,
         )
-        self.stats_text.pack(padx=8, fill="x", pady=(2, 8))
-        self.stats_text.insert("1.0", "Run an analysis to see results...")
-        self.stats_text.config(state="disabled")   # Read-only until updated by analysis
+        self.stats_text.pack(fill="both", expand=True)
+        self.stats_text.insert("1.0", "Run an analysis to see results here…")
+        self.stats_text.config(state="disabled")
+
+        tk.Frame(p, bg=BG_PANEL, height=12).pack(fill="x")
 
     # ══════════════════════════════════════════════════════════════════════════
     # Results area (right panel)
     # ══════════════════════════════════════════════════════════════════════════
 
     def _build_results(self, parent):
-        """Build the notebook (tabbed pane) that holds all result visualisations.
-
-        Tabs created:
-          1. Raman Spectra   — interactive spectrum viewer
-          2. PCA Scatter     — 2-D (or 1-D) scatter of projected training data
-          3. Variance        — scree plot + cumulative variance
-          4. Decision Boundary — filled contour + scatter for train and test
-          5. Component Heatmap — colour-coded loading matrix
-          6. Data Preview    — first 20 rows + descriptive statistics
-
-        Parameters
-        ----------
-        parent : ttk.Frame — right pane of the main PanedWindow
-        """
+        """Build the notebook with all result tabs."""
+        # Tab strip background
+        tk.Frame(parent, bg=BG_PANEL, height=1).pack(fill="x")
         self.notebook = ttk.Notebook(parent)
         self.notebook.pack(fill="both", expand=True)
 
-        # ── Create all tab frames ─────────────────────────────────────────────
-        self.tab_raman    = ttk.Frame(self.notebook)   # Raman spectrum viewer
-        self.tab_molecule = ttk.Frame(self.notebook)   # 3-D molecular viewer
-        self.tab_scatter  = ttk.Frame(self.notebook)   # PCA scatter plot
-        self.tab_variance = ttk.Frame(self.notebook)   # Scree + cumulative variance
-        self.tab_decision = ttk.Frame(self.notebook)   # Decision boundary (train / test)
-        self.tab_heatmap  = ttk.Frame(self.notebook)   # Component loading heatmap
-        self.tab_data     = ttk.Frame(self.notebook)   # Raw data preview table
+        self.tab_raman    = ttk.Frame(self.notebook, style="Card.TFrame")
+        self.tab_molecule = ttk.Frame(self.notebook, style="Card.TFrame")
+        self.tab_scatter  = ttk.Frame(self.notebook, style="Card.TFrame")
+        self.tab_variance = ttk.Frame(self.notebook, style="Card.TFrame")
+        self.tab_decision = ttk.Frame(self.notebook, style="Card.TFrame")
+        self.tab_heatmap  = ttk.Frame(self.notebook, style="Card.TFrame")
+        self.tab_data     = ttk.Frame(self.notebook, style="Card.TFrame")
 
-        # Register tabs in display order
-        self.notebook.add(self.tab_raman,    text="  Raman Spectra  ")
-        self.notebook.add(self.tab_molecule, text="  3D Molecule  ")
-        self.notebook.add(self.tab_scatter,  text="  PCA Scatter  ")
-        self.notebook.add(self.tab_variance, text="  Variance  ")
-        self.notebook.add(self.tab_decision, text="  Decision Boundary  ")
-        self.notebook.add(self.tab_heatmap,  text="  Component Heatmap  ")
-        self.notebook.add(self.tab_data,     text="  Data Preview  ")
+        self.notebook.add(self.tab_raman,    text="  ◎ Raman  ")
+        self.notebook.add(self.tab_molecule, text="  ◎ 3D Molecule  ")
+        self.notebook.add(self.tab_scatter,  text="  ◎ PCA Scatter  ")
+        self.notebook.add(self.tab_variance, text="  ◎ Variance  ")
+        self.notebook.add(self.tab_decision, text="  ◎ Decision Boundary  ")
+        self.notebook.add(self.tab_heatmap,  text="  ◎ Heatmap  ")
+        self.notebook.add(self.tab_data,     text="  ◎ Data Preview  ")
 
-        self._build_raman_tab(self.tab_raman)       # Raman tab has special canvas + hover
-        self._build_molecule_tab(self.tab_molecule) # 3-D viewer with formula input
+        self._build_raman_tab(self.tab_raman)
+        self._build_molecule_tab(self.tab_molecule)
 
-        # ── Create matplotlib figures for the four PCA plot tabs ──────────────
-        self.figures  = {}   # name → Figure object
-        self.canvases = {}   # name → FigureCanvasTkAgg object
+        # ── matplotlib figures for PCA tabs ───────────────────────────────────
+        self.figures  = {}
+        self.canvases = {}
 
         for name, tab in [
             ("scatter",  self.tab_scatter),
@@ -1113,44 +1111,39 @@ class PCAApp(tk.Tk):
             fig = Figure(figsize=(7, 5), dpi=100, facecolor=BG_CARD)
             fig.subplots_adjust(left=0.1, right=0.95, top=0.92, bottom=0.12)
             canvas = FigureCanvasTkAgg(fig, master=tab)
-
-            # Build navigation toolbar and apply dark colours to all children
             toolbar = NavigationToolbar2Tk(canvas, tab)
-            toolbar.config(background=BG_SECONDARY)
+            toolbar.config(background=BG_ELEVATED)
             for child in toolbar.winfo_children():
                 try:
-                    child.config(background=BG_SECONDARY)   # Colour toolbar buttons
+                    child.config(background=BG_ELEVATED, foreground=TEXT_DIM)
                 except Exception:
-                    pass                                     # Separators have no bg option
+                    pass
             toolbar.update()
-
             canvas.get_tk_widget().pack(fill="both", expand=True)
             self.figures[name]  = fig
             self.canvases[name] = canvas
 
-        # ── Data preview tab — scrolled text widget ───────────────────────────
+        # ── Data preview tab ──────────────────────────────────────────────────
         self.data_text = scrolledtext.ScrolledText(
             self.tab_data,
-            bg=BG_SECONDARY, fg=TEXT,
-            font=("Consolas", 9), relief="flat", bd=0,
-            insertbackground=TEXT, selectbackground=ACCENT,
+            bg=BG_ELEVATED, fg=TEXT, font=("Consolas", 9),
+            relief="flat", bd=0,
+            insertbackground=TEXT, selectbackground=INDIGO_DARK,
         )
         self.data_text.pack(fill="both", expand=True, padx=4, pady=4)
 
-        # ── Draw placeholder text on each PCA plot until analysis is run ──────
+        # Placeholder text on each PCA plot
         for name, fig in self.figures.items():
             ax = fig.add_subplot(111)
             ax.set_facecolor(BG_CARD)
-            ax.text(
-                0.5, 0.5, "Load data and run analysis",
-                transform=ax.transAxes,
-                ha="center", va="center",
-                fontsize=14, color=TEXT_DIM, style="italic",
-            )
-            ax.set_xticks([])                          # Hide axis tick marks
+            ax.text(0.5, 0.5, "Load data and run analysis",
+                    transform=ax.transAxes, ha="center", va="center",
+                    fontsize=13, color=TEXT_MUTED, style="italic",
+                    fontfamily="Segoe UI")
+            ax.set_xticks([])
             ax.set_yticks([])
-            for spine in ax.spines.values():
-                spine.set_visible(False)               # Remove box border
+            for sp in ax.spines.values():
+                sp.set_visible(False)
             self.canvases[name].draw()
 
     # ══════════════════════════════════════════════════════════════════════════
@@ -1158,60 +1151,170 @@ class PCAApp(tk.Tk):
     # ══════════════════════════════════════════════════════════════════════════
 
     def _section(self, parent, title):
-        """Render a labelled horizontal rule as a visual section divider.
-
-        If *title* is an empty string only the rule is drawn, providing a
-        blank spacer between the parameter section and the Run button.
-
-        Parameters
-        ----------
-        parent : tk widget — container in which to pack the divider
-        title  : str       — uppercase section label; empty string → rule only
-        """
+        """Legacy section divider — kept for compatibility; prefer _card()."""
         if title:
-            f = ttk.Frame(parent)
-            f.pack(fill="x", padx=8, pady=(12, 2))
-            ttk.Label(
-                f, text=title,
-                font=("Segoe UI", 9, "bold"), foreground=TEXT_DIM,
-            ).pack(side="left")
-            sep = tk.Frame(f, height=1, bg=BORDER)   # 1-px horizontal rule
-            sep.pack(side="left", fill="x", expand=True, padx=(8, 0), pady=1)
+            f = tk.Frame(parent, bg=BG_PANEL)
+            f.pack(fill="x", padx=8, pady=(10, 2))
+            tk.Label(f, text=title, bg=BG_PANEL, fg=TEXT_MUTED,
+                     font=("Segoe UI", 8, "bold")).pack(side="left")
+            tk.Frame(f, height=1, bg=BORDER).pack(side="left", fill="x",
+                                                   expand=True, padx=(8, 0), pady=1)
 
     def _style_ax(self, ax, title=""):
-        """Apply the dark theme to a matplotlib Axes object.
-
-        Sets the axes background, spine colour, tick colour, and title.  Call
-        this immediately after ``fig.add_subplot()`` before drawing data.
-
-        Parameters
-        ----------
-        ax    : matplotlib Axes — target axes to style
-        title : str             — axes title; omit to leave blank
-        """
-        ax.set_facecolor(BG_CARD)                        # Axes interior background
-        ax.tick_params(colors=TEXT_DIM, labelsize=8)     # Tick marks and labels
+        """Apply the Cosmic Indigo theme to a matplotlib Axes."""
+        ax.set_facecolor(BG_CARD)
+        ax.tick_params(colors=TEXT_MUTED, labelsize=8)
         for spine in ax.spines.values():
-            spine.set_color(BORDER)                      # Subtle border around plot area
+            spine.set_color(BORDER)
         if title:
-            ax.set_title(title, color=TEXT, fontsize=12, fontweight="bold", pad=10)
-        ax.xaxis.label.set_color(TEXT_DIM)               # Axis label colour
+            ax.set_title(title, color=TEXT, fontsize=11, fontweight="bold",
+                         pad=10, fontfamily="Segoe UI")
+        ax.xaxis.label.set_color(TEXT_DIM)
         ax.yaxis.label.set_color(TEXT_DIM)
 
+    def _set_status(self, msg, color=None):
+        """Update the bottom status bar message."""
+        self.status_var.set(msg)
+        if hasattr(self, "status_label"):
+            self.status_label.config(foreground=color or TEXT_DIM)
+
     def _update_stats(self, text):
-        """Replace all content in the results summary text box.
+        """Replace content in the results summary text box."""
+        self.stats_text.config(state="normal")
+        self.stats_text.delete("1.0", "end")
+        self.stats_text.insert("1.0", text)
+        self.stats_text.config(state="disabled")
 
-        The widget is kept read-only (state='disabled') at all times except
-        during this update to prevent accidental user edits.
+    # ══════════════════════════════════════════════════════════════════════════
+    # Export — PDF / CSV / PNG
+    # ══════════════════════════════════════════════════════════════════════════
 
-        Parameters
-        ----------
-        text : str — multi-line string to display
-        """
-        self.stats_text.config(state="normal")      # Temporarily unlock for writing
-        self.stats_text.delete("1.0", "end")        # Clear existing content
-        self.stats_text.insert("1.0", text)         # Insert new content at start
-        self.stats_text.config(state="disabled")    # Re-lock to read-only
+    def _styled_toolbar(self, canvas, parent):
+        """Attach and style a NavigationToolbar2Tk to *canvas*."""
+        tb = NavigationToolbar2Tk(canvas, parent)
+        tb.config(background=BG_ELEVATED)
+        for ch in tb.winfo_children():
+            try:
+                ch.config(background=BG_ELEVATED, foreground=TEXT_DIM)
+            except Exception:
+                pass
+        tb.update()
+        return tb
+
+    def _export_pdf(self):
+        """Export all plots and a summary cover page to a PDF report."""
+        path = filedialog.asksaveasfilename(
+            defaultextension=".pdf",
+            filetypes=[("PDF report", "*.pdf"), ("All files", "*.*")],
+            title="Export PDF Report",
+        )
+        if not path:
+            return
+        try:
+            from matplotlib.backends.backend_pdf import PdfPages
+            import datetime
+            with PdfPages(path) as pdf:
+                # Cover page
+                fig_c = Figure(figsize=(8.27, 11.69), facecolor=BG_CARD)
+                ax_c  = fig_c.add_subplot(111)
+                ax_c.set_facecolor(BG_CARD)
+                ax_c.set_axis_off()
+                ax_c.text(0.5, 0.62, "◆  PCA Analysis Tool",
+                          ha="center", fontsize=28, fontweight="bold",
+                          color=INDIGO, transform=ax_c.transAxes)
+                ax_c.text(0.5, 0.54, "Raman Spectroscopy · PCA · 3D Molecules",
+                          ha="center", fontsize=13, color=TEXT_DIM,
+                          transform=ax_c.transAxes)
+                ts = datetime.datetime.now().strftime("%Y-%m-%d  %H:%M")
+                ax_c.text(0.5, 0.46, f"Generated  {ts}",
+                          ha="center", fontsize=10, color=TEXT_MUTED,
+                          transform=ax_c.transAxes)
+                if self.data_X is not None:
+                    info = (f"{self.data_X.shape[0]} samples · "
+                            f"{self.data_X.shape[1]} features · "
+                            f"{len(self.target_names or [])} classes")
+                    ax_c.text(0.5, 0.40, info,
+                              ha="center", fontsize=10, color=TEAL,
+                              transform=ax_c.transAxes)
+                pdf.savefig(fig_c, facecolor=BG_CARD)
+                plt.close(fig_c)
+                # Raman
+                if self.raman_spectra is not None:
+                    pdf.savefig(self.raman_fig, facecolor=BG_CARD)
+                # Molecule
+                if hasattr(self, "mol_fig") and self._last_mol_key:
+                    pdf.savefig(self.mol_fig, facecolor=BG_CARD)
+                # PCA plots
+                for name in ["scatter", "variance", "decision", "heatmap"]:
+                    if name in self.figures and self.pca_result is not None:
+                        pdf.savefig(self.figures[name], facecolor=BG_CARD)
+            self._set_status(f"PDF saved → {path}", GREEN)
+            messagebox.showinfo("Export complete", f"PDF report saved:\n{path}")
+        except Exception as exc:
+            messagebox.showerror("Export error", str(exc))
+            self._set_status("PDF export failed", RED)
+
+    def _export_csv(self):
+        """Export the current feature matrix + labels as a CSV file."""
+        if self.data_X is None:
+            messagebox.showwarning("No data", "Load a dataset first.")
+            return
+        path = filedialog.asksaveasfilename(
+            defaultextension=".csv",
+            filetypes=[("CSV file", "*.csv"), ("All files", "*.*")],
+            title="Export Data as CSV",
+        )
+        if not path:
+            return
+        try:
+            df = self.data_X.copy()
+            if self.data_y is not None and self.target_names:
+                df.insert(0, "label", [
+                    self.target_names[i] if i < len(self.target_names) else str(i)
+                    for i in self.data_y
+                ])
+            df.to_csv(path, index=False)
+            self._set_status(f"CSV saved → {path}", GREEN)
+            messagebox.showinfo("Export complete",
+                                f"CSV saved ({df.shape[0]} rows × {df.shape[1]} cols):\n{path}")
+        except Exception as exc:
+            messagebox.showerror("Export error", str(exc))
+            self._set_status("CSV export failed", RED)
+
+    def _export_png(self):
+        """Export every visible plot as a high-DPI PNG into a chosen folder."""
+        import os
+        folder = filedialog.askdirectory(title="Select PNG export folder")
+        if not folder:
+            return
+        try:
+            saved = []
+            kw = dict(dpi=180, bbox_inches="tight")
+            if self.raman_spectra is not None:
+                p = os.path.join(folder, "raman_spectra.png")
+                self.raman_fig.savefig(p, facecolor=BG_CARD, **kw)
+                saved.append("raman_spectra.png")
+            if hasattr(self, "mol_fig") and self._last_mol_key:
+                p = os.path.join(folder, "molecule_3d.png")
+                self.mol_fig.savefig(p, facecolor=BG_CARD, **kw)
+                saved.append("molecule_3d.png")
+            for name in ["scatter", "variance", "decision", "heatmap"]:
+                if name in self.figures and self.pca_result is not None:
+                    fname = f"pca_{name}.png"
+                    self.figures[name].savefig(
+                        os.path.join(folder, fname), facecolor=BG_CARD, **kw)
+                    saved.append(fname)
+            if not saved:
+                messagebox.showinfo("Nothing to export",
+                                    "Run an analysis or load Raman data first.")
+                return
+            self._set_status(f"{len(saved)} PNGs saved → {folder}", GREEN)
+            messagebox.showinfo("Export complete",
+                                f"Saved {len(saved)} images to:\n{folder}\n\n"
+                                + "\n".join(saved))
+        except Exception as exc:
+            messagebox.showerror("Export error", str(exc))
+            self._set_status("PNG export failed", RED)
 
     # ══════════════════════════════════════════════════════════════════════════
     # Data loading — general
@@ -1480,13 +1583,17 @@ class PCAApp(tk.Tk):
             # ── Schedule UI updates on the main thread ────────────────────────
             self.after(0, lambda: self._update_stats("\n".join(stats_lines)))
             self.after(0, self._plot_all)
+            self.after(0, lambda: self._set_status(
+                f"PCA complete — {n_comp} components, "
+                f"{len(y_train)}/{len(y_test)} train/test", GREEN))
 
         except Exception as e:
             self.after(0, lambda: messagebox.showerror("Analysis Error", str(e)))
+            self.after(0, lambda: self._set_status(f"Analysis error: {e}", RED))
         finally:
-            # Always re-enable UI regardless of success or failure
             self.after(0, lambda: self.progress.stop())
-            self.after(0, lambda: self.run_btn.config(state="normal"))
+            self.after(0, lambda: self.run_btn.config(
+                state="normal", bg=INDIGO_DARK))
 
     # ══════════════════════════════════════════════════════════════════════════
     # PCA result plots
@@ -1753,45 +1860,37 @@ class PCAApp(tk.Tk):
         parent : ttk.Frame — the 'Raman Spectra' notebook tab frame
         """
         # ── Header strip ──────────────────────────────────────────────────────
-        ctrl = ttk.Frame(parent)
-        ctrl.pack(fill="x", padx=8, pady=(6, 2))
-        ttk.Label(ctrl, text="Interactive Raman Viewer", style="Header.TLabel").pack(side="left")
+        ctrl = tk.Frame(parent, bg=BG_CARD)
+        ctrl.pack(fill="x", padx=0, pady=0)
+        tk.Label(ctrl, text="  ◎  Raman Spectra Viewer", bg=BG_CARD,
+                 fg=VIOLET, font=("Segoe UI", 12, "bold")).pack(side="left", pady=8, padx=10)
 
         # ── matplotlib figure embedded in the Tk frame ────────────────────────
         self.raman_fig = Figure(figsize=(8, 5), dpi=100, facecolor=BG_CARD)
         self.raman_fig.subplots_adjust(left=0.07, right=0.97, top=0.92, bottom=0.10)
         self.raman_canvas = FigureCanvasTkAgg(self.raman_fig, master=parent)
 
-        # Apply dark colours to the navigation toolbar
-        toolbar = NavigationToolbar2Tk(self.raman_canvas, parent)
-        toolbar.config(background=BG_SECONDARY)
-        for child in toolbar.winfo_children():
-            try:
-                child.config(background=BG_SECONDARY)   # Theme each toolbar button
-            except Exception:
-                pass                                     # Skip widgets that reject bg
-        toolbar.update()
+        toolbar = self._styled_toolbar(self.raman_canvas, parent)
 
         self.raman_canvas.get_tk_widget().pack(fill="both", expand=True)
 
         # ── Cursor readout ────────────────────────────────────────────────────
         self.raman_cursor_var = tk.StringVar(
-            value="Hover over the plot — wavenumber and intensity will appear here"
+            value="Hover over the spectrum to read wavenumber and intensity"
         )
-        ttk.Label(parent, textvariable=self.raman_cursor_var,
-                  style="Dim.TLabel").pack(pady=(2, 6))
+        tk.Label(parent, textvariable=self.raman_cursor_var,
+                 bg=BG_CARD, fg=TEXT_MUTED,
+                 font=("Consolas", 8)).pack(pady=(2, 6))
 
-        # Register hover callback (fires on every mouse-move over the canvas)
         self.raman_canvas.mpl_connect("motion_notify_event", self._on_raman_hover)
 
-        # ── Placeholder axes (shown before any data is loaded) ────────────────
+        # Placeholder axes
         ax = self.raman_fig.add_subplot(111)
         ax.set_facecolor(BG_CARD)
-        ax.text(
-            0.5, 0.5, "Select a Raman preset or load a CSV to view spectra",
-            transform=ax.transAxes, ha="center", va="center",
-            fontsize=13, color=TEXT_DIM, style="italic",
-        )
+        ax.text(0.5, 0.5, "Select a Raman preset or load a CSV to view spectra",
+                transform=ax.transAxes, ha="center", va="center",
+                fontsize=13, color=TEXT_MUTED, style="italic",
+                fontfamily="Segoe UI")
         ax.set_xticks([])
         ax.set_yticks([])
         for spine in ax.spines.values():

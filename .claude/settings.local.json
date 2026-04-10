@@ -4,7 +4,8 @@
       "Bash(python -c ':*)",
       "Bash(python ti_raman.py)",
       "Bash(python ti_pca.py)",
-      "Bash(python -m py_compile pca_analysis_gui.py)"
+      "Bash(python -m py_compile pca_analysis_gui.py)",
+      "Bash(python:*)"
     ]
   }
 }
