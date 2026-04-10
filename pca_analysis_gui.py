@@ -49,6 +49,7 @@ from matplotlib.backends.backend_tkagg import (
 )
 from matplotlib.colors import ListedColormap  # Discrete colormap for decision-boundary fills
 from matplotlib.figure import Figure          # OO Figure container (preferred over plt.figure)
+from mpl_toolkits.mplot3d import Axes3D       # noqa: F401 — registers the '3d' projection
 
 # ── Third-party: scikit-learn ─────────────────────────────────────────────────
 from sklearn.decomposition import PCA                        # Core PCA algorithm
@@ -63,6 +64,7 @@ try:
     from scipy.signal import savgol_filter as _savgol_filter    # Savitzky-Golay polynomial smoother
     from scipy.ndimage import gaussian_filter1d as _gfilt1d     # Gaussian convolution smoother
     from scipy.signal import medfilt as _medfilt                # Median filter for spike removal
+    from scipy.signal import find_peaks as _find_peaks          # Local-maxima peak detector
     _SCIPY_OK = True
 except ImportError:
     _SCIPY_OK = False   # scipy not installed; numpy-only fallbacks will be used
@@ -93,6 +95,31 @@ PLOT_CMAPS = [
     ListedColormap(["#ffd43b", "#f8f9fa", "#96f2d7"]),  # Warm palette — training panel
     ListedColormap(["#ffa8a8", "#d0ebff", "#b2f2bb"]),  # Cool palette — test panel
 ]
+
+# ── CPK element properties used by the 3-D molecular viewer ───────────────────
+# Each entry: display colour (hex), covalent radius (Å), scatter marker size
+ELEMENT_PROPS = {
+    "H":  {"color": "#E8E8E8", "cov_r": 0.31, "size": 80},
+    "C":  {"color": "#505050", "cov_r": 0.76, "size": 160},
+    "N":  {"color": "#3050F8", "cov_r": 0.71, "size": 150},
+    "O":  {"color": "#FF2010", "cov_r": 0.66, "size": 140},
+    "F":  {"color": "#90E050", "cov_r": 0.57, "size": 120},
+    "S":  {"color": "#E8E820", "cov_r": 1.05, "size": 200},
+    "Cl": {"color": "#1FF01F", "cov_r": 0.99, "size": 190},
+    "Br": {"color": "#A62929", "cov_r": 1.14, "size": 210},
+    "P":  {"color": "#FF8000", "cov_r": 1.07, "size": 195},
+    "Si": {"color": "#F0C8A0", "cov_r": 1.11, "size": 205},
+    "Na": {"color": "#AB5CF2", "cov_r": 1.66, "size": 280},
+    "K":  {"color": "#8F40D4", "cov_r": 2.03, "size": 320},
+    "Ca": {"color": "#3DFF00", "cov_r": 1.76, "size": 290},
+    "Mg": {"color": "#8AFF00", "cov_r": 1.41, "size": 240},
+    "Ti": {"color": "#BFC2C7", "cov_r": 1.36, "size": 230},
+    "Fe": {"color": "#E06633", "cov_r": 1.16, "size": 215},
+    "Al": {"color": "#BFA6A6", "cov_r": 1.21, "size": 215},
+    "Zn": {"color": "#7D80B0", "cov_r": 1.22, "size": 220},
+    "Cu": {"color": "#C88033", "cov_r": 1.32, "size": 225},
+}
+_ELEM_DEFAULT = {"color": "#FF69B4", "cov_r": 1.50, "size": 200}  # Pink fallback
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -250,6 +277,306 @@ NOISE_METHODS = [
     "Moving Average",   # Uniform-kernel convolution (numpy only)
     "Median",           # Robust spike-removal filter (scipy or numpy fallback)
 ]
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 3-D Molecular structure database
+# ═══════════════════════════════════════════════════════════════════════════════
+# Atoms stored as (element_symbol, x_Å, y_Å, z_Å).
+# Coordinates from standard references: NIST WebBook, CCDC, literature.
+# Ionic / mineral fragments show the asymmetric unit or a small cluster.
+
+MOLECULAR_DATABASE = {
+    # ── Simple diatomics ─────────────────────────────────────────────────────
+    "H2": {
+        "name": "Hydrogen", "formula": "H₂", "category": "Diatomic",
+        "description": "H–H single bond  (0.741 Å)",
+        "atoms": [("H", -0.371, 0.000, 0.000), ("H", 0.371, 0.000, 0.000)],
+    },
+    "O2": {
+        "name": "Oxygen", "formula": "O₂", "category": "Diatomic",
+        "description": "O=O double bond  (1.208 Å)",
+        "atoms": [("O", -0.604, 0.000, 0.000), ("O", 0.604, 0.000, 0.000)],
+    },
+    "N2": {
+        "name": "Nitrogen", "formula": "N₂", "category": "Diatomic",
+        "description": "N≡N triple bond  (1.098 Å)",
+        "atoms": [("N", -0.549, 0.000, 0.000), ("N", 0.549, 0.000, 0.000)],
+    },
+    "HCl": {
+        "name": "Hydrogen Chloride", "formula": "HCl", "category": "Diatomic",
+        "description": "H–Cl bond  (1.274 Å)",
+        "atoms": [("H", -0.637, 0.000, 0.000), ("Cl", 0.637, 0.000, 0.000)],
+    },
+    # ── Triatomics ────────────────────────────────────────────────────────────
+    "H2O": {
+        "name": "Water", "formula": "H₂O", "category": "Inorganic",
+        "description": "Bent  H–O–H = 104.5°,  O–H = 0.957 Å",
+        "atoms": [
+            ("O",  0.000,  0.000, 0.000),
+            ("H",  0.757,  0.586, 0.000),
+            ("H", -0.757,  0.586, 0.000),
+        ],
+    },
+    "CO2": {
+        "name": "Carbon Dioxide", "formula": "CO₂", "category": "Inorganic",
+        "description": "Linear  O=C=O,  C=O = 1.163 Å",
+        "atoms": [
+            ("O", -1.163, 0.000, 0.000),
+            ("C",  0.000, 0.000, 0.000),
+            ("O",  1.163, 0.000, 0.000),
+        ],
+    },
+    "HCN": {
+        "name": "Hydrogen Cyanide", "formula": "HCN", "category": "Inorganic",
+        "description": "Linear  H–C≡N,  C–N = 1.156 Å",
+        "atoms": [
+            ("H", -1.065, 0.000, 0.000),
+            ("C",  0.000, 0.000, 0.000),
+            ("N",  1.156, 0.000, 0.000),
+        ],
+    },
+    # ── Small inorganic polyatomics ───────────────────────────────────────────
+    "NH3": {
+        "name": "Ammonia", "formula": "NH₃", "category": "Inorganic",
+        "description": "Trigonal pyramidal  H–N–H = 107.8°,  N–H = 1.012 Å",
+        "atoms": [
+            ("N",  0.000,  0.000,  0.000),
+            ("H",  0.000, -0.938, -0.382),
+            ("H",  0.812,  0.469, -0.382),
+            ("H", -0.812,  0.469, -0.382),
+        ],
+    },
+    "CH4": {
+        "name": "Methane", "formula": "CH₄", "category": "Organic",
+        "description": "Tetrahedral  Td,  C–H = 1.091 Å",
+        "atoms": [
+            ("C",  0.000,  0.000,  0.000),
+            ("H",  0.630,  0.630,  0.630),
+            ("H", -0.630, -0.630,  0.630),
+            ("H", -0.630,  0.630, -0.630),
+            ("H",  0.630, -0.630, -0.630),
+        ],
+    },
+    "CH2O": {
+        "name": "Formaldehyde", "formula": "CH₂O", "category": "Organic",
+        "description": "Planar  C=O,  H–C–H = 116.5°",
+        "atoms": [
+            ("C",  0.000,  0.000, 0.000),
+            ("O",  1.208,  0.000, 0.000),
+            ("H", -0.590,  0.952, 0.000),
+            ("H", -0.590, -0.952, 0.000),
+        ],
+    },
+    # ── Organic molecules ─────────────────────────────────────────────────────
+    "C2H2": {
+        "name": "Acetylene", "formula": "C₂H₂", "category": "Organic",
+        "description": "Linear  H–C≡C–H,  C–C = 1.203 Å",
+        "atoms": [
+            ("H", -1.667, 0.000, 0.000),
+            ("C", -0.602, 0.000, 0.000),
+            ("C",  0.602, 0.000, 0.000),
+            ("H",  1.667, 0.000, 0.000),
+        ],
+    },
+    "C2H4": {
+        "name": "Ethylene", "formula": "C₂H₄", "category": "Organic",
+        "description": "Planar  C=C = 1.339 Å,  H–C–H = 116.6°",
+        "atoms": [
+            ("C", -0.670,  0.000, 0.000),
+            ("C",  0.670,  0.000, 0.000),
+            ("H", -1.241,  0.924, 0.000),
+            ("H", -1.241, -0.924, 0.000),
+            ("H",  1.241,  0.924, 0.000),
+            ("H",  1.241, -0.924, 0.000),
+        ],
+    },
+    "C2H6": {
+        "name": "Ethane", "formula": "C₂H₆", "category": "Organic",
+        "description": "Staggered  C–C = 1.524 Å,  H–C–C = 111.2°",
+        "atoms": [
+            ("C", -0.762,  0.000,  0.000),
+            ("C",  0.762,  0.000,  0.000),
+            ("H", -1.157,  1.018,  0.000),
+            ("H", -1.157, -0.509,  0.882),
+            ("H", -1.157, -0.509, -0.882),
+            ("H",  1.157, -1.018,  0.000),
+            ("H",  1.157,  0.509,  0.882),
+            ("H",  1.157,  0.509, -0.882),
+        ],
+    },
+    "CH3OH": {
+        "name": "Methanol", "formula": "CH₃OH", "category": "Organic",
+        "description": "C–O = 1.431 Å,  O–H = 0.960 Å,  C–O–H = 108.5°",
+        "atoms": [
+            ("C",  0.000,  0.000,  0.000),
+            ("O",  1.431,  0.000,  0.000),
+            ("H",  1.737,  0.912,  0.000),
+            ("H", -0.363,  1.029,  0.000),
+            ("H", -0.363, -0.515,  0.890),
+            ("H", -0.363, -0.515, -0.890),
+        ],
+    },
+    "C2H5OH": {
+        "name": "Ethanol", "formula": "C₂H₅OH", "category": "Organic",
+        "description": "C–C–O backbone,  C–O = 1.431 Å,  anti conformation",
+        "atoms": [
+            ("C", -1.232,  0.082,  0.000),
+            ("C",  0.000, -0.767,  0.000),
+            ("O",  1.175,  0.073,  0.000),
+            ("H",  1.972, -0.476,  0.000),
+            ("H", -1.231,  0.720,  0.890),
+            ("H", -1.231,  0.720, -0.890),
+            ("H", -2.138, -0.530,  0.000),
+            ("H",  0.000, -1.406,  0.890),
+            ("H",  0.000, -1.406, -0.890),
+        ],
+    },
+    "C3H8": {
+        "name": "Propane", "formula": "C₃H₈", "category": "Organic",
+        "description": "Extended chain  C–C–C = 112°,  C–C = 1.532 Å",
+        "atoms": [
+            ("C", -1.268,  0.000,  0.000),
+            ("C",  0.000,  0.620,  0.000),
+            ("C",  1.268,  0.000,  0.000),
+            ("H", -1.900,  0.633,  0.629),
+            ("H", -1.900,  0.633, -0.629),
+            ("H", -1.450, -1.040,  0.000),
+            ("H",  0.000,  1.258,  0.889),
+            ("H",  0.000,  1.258, -0.889),
+            ("H",  1.900,  0.633,  0.629),
+            ("H",  1.900,  0.633, -0.629),
+            ("H",  1.450, -1.040,  0.000),
+        ],
+    },
+    "C6H6": {
+        "name": "Benzene", "formula": "C₆H₆", "category": "Organic",
+        "description": "Aromatic ring  D₆h,  C–C = 1.397 Å  (resonance)",
+        "atoms": [
+            ("C",  1.397,  0.000, 0.000),
+            ("C",  0.699,  1.210, 0.000),
+            ("C", -0.699,  1.210, 0.000),
+            ("C", -1.397,  0.000, 0.000),
+            ("C", -0.699, -1.210, 0.000),
+            ("C",  0.699, -1.210, 0.000),
+            ("H",  2.482,  0.000, 0.000),
+            ("H",  1.241,  2.149, 0.000),
+            ("H", -1.241,  2.149, 0.000),
+            ("H", -2.482,  0.000, 0.000),
+            ("H", -1.241, -2.149, 0.000),
+            ("H",  1.241, -2.149, 0.000),
+        ],
+    },
+    "H2SO4": {
+        "name": "Sulfuric Acid", "formula": "H₂SO₄", "category": "Inorganic",
+        "description": "Tetrahedral S  —  2 S=O + 2 S–OH,  S–O = 1.43 / 1.57 Å",
+        "atoms": [
+            ("S",  0.000,  0.000,  0.000),
+            ("O",  1.052,  1.052,  0.450),
+            ("O", -1.052,  1.052, -0.450),
+            ("O",  0.900, -1.100,  0.000),
+            ("O", -0.900, -1.100,  0.000),
+            ("H",  1.750, -1.650,  0.000),
+            ("H", -1.750, -1.650,  0.000),
+        ],
+    },
+    # ── Mineral / crystal unit fragments ─────────────────────────────────────
+    "SiO2": {
+        "name": "Silicon Dioxide (Quartz)", "formula": "SiO₂", "category": "Mineral",
+        "description": "SiO₄ tetrahedron  —  Si–O = 1.610 Å,  O–Si–O = 109.5°",
+        "atoms": [
+            ("Si",  0.000,  0.000,  0.000),
+            ("O",   0.930,  0.930,  0.930),
+            ("O",   0.930, -0.930, -0.930),
+            ("O",  -0.930,  0.930, -0.930),
+            ("O",  -0.930, -0.930,  0.930),
+        ],
+    },
+    "CaCO3": {
+        "name": "Calcium Carbonate (Calcite)", "formula": "CaCO₃", "category": "Mineral",
+        "description": "Planar CO₃²⁻  +  Ca²⁺,  C–O = 1.290 Å",
+        "atoms": [
+            ("C",   0.000,  0.000,  0.000),
+            ("O",   1.290,  0.000,  0.000),
+            ("O",  -0.645,  1.117,  0.000),
+            ("O",  -0.645, -1.117,  0.000),
+            ("Ca",  0.000,  0.000,  2.360),
+        ],
+    },
+    "TiO2": {
+        "name": "Titanium Dioxide (Anatase)", "formula": "TiO₂", "category": "Mineral",
+        "description": "TiO₆ octahedron  —  anatase phase,  Ti–O = 1.93 / 1.97 Å",
+        "atoms": [
+            ("Ti",  0.000,  0.000,  0.000),
+            ("O",   1.930,  0.000,  0.000),
+            ("O",  -1.930,  0.000,  0.000),
+            ("O",   0.000,  1.930,  0.000),
+            ("O",   0.000, -1.930,  0.000),
+            ("O",   0.000,  0.000,  1.970),
+            ("O",   0.000,  0.000, -1.970),
+        ],
+    },
+    "NaCl": {
+        "name": "Sodium Chloride (Rock Salt)", "formula": "NaCl", "category": "Mineral",
+        "description": "FCC ionic crystal cluster  —  d(Na–Cl) = 2.82 Å",
+        "atoms": [
+            ("Na",  0.000,  0.000,  0.000),
+            ("Na",  0.000,  2.820,  2.820),
+            ("Na",  2.820,  0.000,  2.820),
+            ("Na",  2.820,  2.820,  0.000),
+            ("Cl",  2.820,  0.000,  0.000),
+            ("Cl",  0.000,  2.820,  0.000),
+            ("Cl",  0.000,  0.000,  2.820),
+            ("Cl",  2.820,  2.820,  2.820),
+        ],
+    },
+    "Al2O3": {
+        "name": "Aluminium Oxide (Corundum)", "formula": "Al₂O₃", "category": "Mineral",
+        "description": "α-corundum AlO₆ octahedral pair  —  Al–O = 1.86 / 1.97 Å",
+        "atoms": [
+            ("Al",  0.000,  0.000,  0.000),
+            ("Al",  0.000,  0.000,  2.165),
+            ("O",   1.856,  0.000,  0.548),
+            ("O",  -0.928,  1.608,  0.548),
+            ("O",  -0.928, -1.608,  0.548),
+            ("O",   1.856,  0.000,  1.617),
+            ("O",  -0.928,  1.608,  1.617),
+            ("O",  -0.928, -1.608,  1.617),
+        ],
+    },
+}
+
+# Flat list used to populate the molecule preset combobox (sorted by category then name)
+_MOL_KEYS_SORTED = sorted(
+    MOLECULAR_DATABASE.keys(),
+    key=lambda k: (MOLECULAR_DATABASE[k]["category"], MOLECULAR_DATABASE[k]["name"]),
+)
+
+
+def _compute_bonds(atoms):
+    """Return a list of (i, j) index pairs for atoms that are covalently bonded.
+
+    Bonding criterion: distance ≤ (r_cov_i + r_cov_j) × 1.15
+    where r_cov is the covalent radius from ELEMENT_PROPS.
+
+    Parameters
+    ----------
+    atoms : list of (element, x, y, z)
+
+    Returns
+    -------
+    list of (int, int) — index pairs
+    """
+    bonds = []
+    for i in range(len(atoms)):
+        for j in range(i + 1, len(atoms)):
+            ei, xi, yi, zi = atoms[i]
+            ej, xj, yj, zj = atoms[j]
+            ri = ELEMENT_PROPS.get(ei, _ELEM_DEFAULT)["cov_r"]
+            rj = ELEMENT_PROPS.get(ej, _ELEM_DEFAULT)["cov_r"]
+            d  = ((xi - xj)**2 + (yi - yj)**2 + (zi - zj)**2) ** 0.5
+            if d <= (ri + rj) * 1.15:
+                bonds.append((i, j))
+    return bonds
 
 
 def _lorentzian(x, center, width, amp):
@@ -630,6 +957,11 @@ class PCAApp(tk.Tk):
             command=self._plot_raman_spectra,   # Re-draw immediately on toggle
         ).pack(anchor="w", padx=8, pady=(2, 4))
 
+        ttk.Button(
+            p, text="🔍  Identify Crystal Structure",
+            command=self._identify_crystal_structure,
+        ).pack(padx=8, pady=(2, 4), fill="x")
+
         # ── Section: Signal Processing ────────────────────────────────────────
         self._section(p, "SIGNAL PROCESSING")
 
@@ -749,6 +1081,7 @@ class PCAApp(tk.Tk):
 
         # ── Create all tab frames ─────────────────────────────────────────────
         self.tab_raman    = ttk.Frame(self.notebook)   # Raman spectrum viewer
+        self.tab_molecule = ttk.Frame(self.notebook)   # 3-D molecular viewer
         self.tab_scatter  = ttk.Frame(self.notebook)   # PCA scatter plot
         self.tab_variance = ttk.Frame(self.notebook)   # Scree + cumulative variance
         self.tab_decision = ttk.Frame(self.notebook)   # Decision boundary (train / test)
@@ -757,13 +1090,15 @@ class PCAApp(tk.Tk):
 
         # Register tabs in display order
         self.notebook.add(self.tab_raman,    text="  Raman Spectra  ")
+        self.notebook.add(self.tab_molecule, text="  3D Molecule  ")
         self.notebook.add(self.tab_scatter,  text="  PCA Scatter  ")
         self.notebook.add(self.tab_variance, text="  Variance  ")
         self.notebook.add(self.tab_decision, text="  Decision Boundary  ")
         self.notebook.add(self.tab_heatmap,  text="  Component Heatmap  ")
         self.notebook.add(self.tab_data,     text="  Data Preview  ")
 
-        self._build_raman_tab(self.tab_raman)   # Raman tab has special canvas + hover
+        self._build_raman_tab(self.tab_raman)       # Raman tab has special canvas + hover
+        self._build_molecule_tab(self.tab_molecule) # 3-D viewer with formula input
 
         # ── Create matplotlib figures for the four PCA plot tabs ──────────────
         self.figures  = {}   # name → Figure object
@@ -1463,6 +1798,245 @@ class PCAApp(tk.Tk):
             spine.set_visible(False)
         self.raman_canvas.draw()
 
+    # ══════════════════════════════════════════════════════════════════════════
+    # 3-D Molecular viewer tab
+    # ══════════════════════════════════════════════════════════════════════════
+
+    def _build_molecule_tab(self, parent):
+        """Build the interactive 3-D molecular structure viewer tab.
+
+        Layout
+        ------
+        • Top control strip: formula entry, Build button, preset combobox,
+          label toggle.
+        • Centre: matplotlib 3-D Figure with NavigationToolbar (rotate/zoom/pan).
+        • Bottom: one-line info label (atom count, bond count).
+        """
+        print("[Molecule] Building molecule tab")
+
+        # ── Control strip ──────────────────────────────────────────────────────
+        ctrl = ttk.Frame(parent)
+        ctrl.pack(fill="x", padx=8, pady=(6, 2))
+        ttk.Label(ctrl, text="3D Molecular Viewer", style="Header.TLabel").pack(side="left")
+
+        # Formula / name entry
+        entry_frame = ttk.Frame(parent)
+        entry_frame.pack(fill="x", padx=8, pady=(0, 2))
+
+        ttk.Label(entry_frame, text="Formula / Name:").pack(side="left")
+        self.mol_formula_var = tk.StringVar(value="H2O")
+        mol_entry = ttk.Entry(entry_frame, textvariable=self.mol_formula_var, width=14)
+        mol_entry.pack(side="left", padx=(4, 6))
+        mol_entry.bind("<Return>", lambda e: self._build_molecule())
+
+        ttk.Button(entry_frame, text="Build 3D",
+                   command=self._build_molecule).pack(side="left", padx=(0, 12))
+
+        ttk.Label(entry_frame, text="or preset:", style="Dim.TLabel").pack(side="left")
+        self.mol_preset_var = tk.StringVar(value="— select —")
+        preset_values = [f"{k}  —  {MOLECULAR_DATABASE[k]['name']}"
+                         for k in _MOL_KEYS_SORTED]
+        mol_combo = ttk.Combobox(
+            entry_frame, textvariable=self.mol_preset_var,
+            state="readonly", width=34, values=["— select —"] + preset_values,
+        )
+        mol_combo.pack(side="left", padx=(4, 0))
+        mol_combo.bind("<<ComboboxSelected>>", self._on_mol_preset_selected)
+
+        # Label toggle
+        self.mol_labels_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            entry_frame, text="Labels",
+            variable=self.mol_labels_var,
+            command=self._refresh_molecule,
+        ).pack(side="left", padx=(10, 0))
+
+        # ── 3-D matplotlib figure ──────────────────────────────────────────────
+        self.mol_fig = Figure(figsize=(8, 5), dpi=100, facecolor=BG_CARD)
+        self.mol_canvas = FigureCanvasTkAgg(self.mol_fig, master=parent)
+
+        mol_toolbar = NavigationToolbar2Tk(self.mol_canvas, parent)
+        mol_toolbar.config(background=BG_SECONDARY)
+        for child in mol_toolbar.winfo_children():
+            try:
+                child.config(background=BG_SECONDARY)
+            except Exception:
+                pass
+        mol_toolbar.update()
+
+        self.mol_canvas.get_tk_widget().pack(fill="both", expand=True)
+
+        # ── Info label ────────────────────────────────────────────────────────
+        self.mol_info_var = tk.StringVar(value="Enter a formula and click Build 3D")
+        ttk.Label(parent, textvariable=self.mol_info_var,
+                  style="Dim.TLabel").pack(pady=(2, 6))
+
+        # ── Placeholder axes ──────────────────────────────────────────────────
+        ax = self.mol_fig.add_subplot(111, projection="3d")
+        ax.set_facecolor(BG_CARD)
+        self.mol_fig.patch.set_facecolor(BG_CARD)
+        ax.text(0, 0, 0,
+                "Enter a formula or select a preset\nto visualise the 3D structure",
+                ha="center", va="center", color=TEXT_DIM, fontsize=11, style="italic")
+        ax.set_axis_off()
+        self.mol_canvas.draw()
+
+        # Cache last plotted molecule key so the label toggle can re-use it
+        self._last_mol_key = None
+
+    def _on_mol_preset_selected(self, event=None):
+        """Load the molecule selected in the preset combobox and plot it."""
+        val = self.mol_preset_var.get()
+        if val.startswith("—"):
+            return
+        key = val.split("  —  ")[0].strip()
+        print(f"[Molecule] Preset selected: {key!r}")
+        self.mol_formula_var.set(key)
+        self._plot_molecule_3d(key)
+
+    def _refresh_molecule(self):
+        """Re-plot the last drawn molecule (used by the label toggle)."""
+        if self._last_mol_key:
+            self._plot_molecule_3d(self._last_mol_key)
+
+    def _build_molecule(self):
+        """Resolve the formula/name typed in the entry field and plot it."""
+        raw = self.mol_formula_var.get().strip()
+        print(f"[Molecule] Build requested for: {raw!r}")
+        if not raw:
+            return
+
+        # Direct key lookup (case-insensitive)
+        key = next((k for k in MOLECULAR_DATABASE if k.lower() == raw.lower()), None)
+
+        # Fallback: match by molecule name
+        if key is None:
+            key = next(
+                (k for k, v in MOLECULAR_DATABASE.items()
+                 if v["name"].lower() == raw.lower()),
+                None,
+            )
+
+        if key is None:
+            known = ", ".join(_MOL_KEYS_SORTED)
+            messagebox.showinfo(
+                "Not Found",
+                f"'{raw}' is not in the built-in database.\n\n"
+                f"Known formulas / names:\n{known}",
+            )
+            print(f"[Molecule] '{raw}' not found in database")
+            return
+
+        self._plot_molecule_3d(key)
+
+    def _plot_molecule_3d(self, key):
+        """Render the molecule identified by *key* in the 3-D axes.
+
+        Atoms are drawn as scatter spheres coloured by element (CPK scheme).
+        Bonds are drawn as grey line segments.  Element labels appear next to
+        each atom when the Labels toggle is on.
+
+        Drag  → rotate (handled by mpl_toolkits.mplot3d automatically)
+        Scroll → zoom  (handled by matplotlib >= 3.3 natively)
+        Toolbar → zoom-box, pan, save
+
+        Parameters
+        ----------
+        key : str — key in MOLECULAR_DATABASE
+        """
+        print(f"[Molecule] Plotting: {key}")
+        entry  = MOLECULAR_DATABASE[key]
+        atoms  = entry["atoms"]   # list of (element, x, y, z)
+        bonds  = _compute_bonds(atoms)
+        show_labels = self.mol_labels_var.get()
+
+        print(f"[Molecule]   atoms={len(atoms)}  bonds={len(bonds)}")
+
+        self.mol_fig.clf()
+        ax = self.mol_fig.add_subplot(111, projection="3d")
+        ax.set_facecolor(BG_CARD)
+        self.mol_fig.patch.set_facecolor(BG_CARD)
+
+        # ── Draw bonds first (under atoms) ────────────────────────────────────
+        for i, j in bonds:
+            _, xi, yi, zi = atoms[i]
+            _, xj, yj, zj = atoms[j]
+            ax.plot(
+                [xi, xj], [yi, yj], [zi, zj],
+                color="#888888", linewidth=2.5, alpha=0.7, zorder=1,
+            )
+
+        # ── Draw atoms ────────────────────────────────────────────────────────
+        seen_elems = {}
+        for idx, (elem, x, y, z) in enumerate(atoms):
+            props = ELEMENT_PROPS.get(elem, _ELEM_DEFAULT)
+            color = props["color"]
+            size  = props["size"]
+
+            # First occurrence of each element → add to legend
+            if elem not in seen_elems:
+                seen_elems[elem] = color
+                label = elem
+            else:
+                label = "_nolegend_"
+
+            ax.scatter(
+                [x], [y], [z],
+                c=[color], s=size * 4,   # *4 because scatter s is in points²
+                depthshade=True, edgecolors="#FFFFFF44",
+                linewidths=0.5, label=label, zorder=2,
+            )
+
+            if show_labels:
+                ax.text(x, y, z, f" {elem}", color=TEXT, fontsize=7,
+                        ha="left", va="bottom", zorder=3)
+
+        # ── Axis styling ──────────────────────────────────────────────────────
+        ax.set_xlabel("x (Å)", color=TEXT_DIM, fontsize=8, labelpad=2)
+        ax.set_ylabel("y (Å)", color=TEXT_DIM, fontsize=8, labelpad=2)
+        ax.set_zlabel("z (Å)", color=TEXT_DIM, fontsize=8, labelpad=2)
+        ax.tick_params(colors=TEXT_DIM, labelsize=7)
+        ax.xaxis.pane.fill = False
+        ax.yaxis.pane.fill = False
+        ax.zaxis.pane.fill = False
+        ax.xaxis.pane.set_edgecolor(BORDER)
+        ax.yaxis.pane.set_edgecolor(BORDER)
+        ax.zaxis.pane.set_edgecolor(BORDER)
+        ax.grid(True, color=BORDER, linewidth=0.4, alpha=0.5)
+
+        title = f"{entry['name']}  ({entry['formula']})   [{entry['category']}]"
+        ax.set_title(title, color=TEXT, fontsize=11, fontweight="bold", pad=10)
+
+        # Legend (element colour key)
+        leg = ax.legend(
+            title="Elements", title_fontsize=8,
+            facecolor=BG_SECONDARY, edgecolor=BORDER,
+            fontsize=8, labelcolor=TEXT,
+            loc="upper left", markerscale=0.6,
+        )
+        leg.get_title().set_color(TEXT_DIM)
+
+        # Equal aspect ratio — centre the molecule
+        coords = np.array([(x, y, z) for _, x, y, z in atoms])
+        mid    = coords.mean(axis=0)
+        rng    = max((coords.max(axis=0) - coords.min(axis=0)).max() / 2.0, 1.0)
+        ax.set_xlim(mid[0] - rng, mid[0] + rng)
+        ax.set_ylim(mid[1] - rng, mid[1] + rng)
+        ax.set_zlim(mid[2] - rng, mid[2] + rng)
+
+        try:
+            ax.set_box_aspect([1, 1, 1])   # matplotlib >= 3.3
+        except AttributeError:
+            pass
+
+        self.mol_canvas.draw()
+        self._last_mol_key = key
+
+        info = (f"{entry['description']}   |   "
+                f"{len(atoms)} atoms   {len(bonds)} bonds")
+        self.mol_info_var.set(info)
+        print(f"[Molecule] Done — {info}")
+
     def _on_raman_preset_selected(self, event=None):
         """Generate synthetic spectra for the chosen preset and load them.
 
@@ -1892,6 +2466,162 @@ class PCAApp(tk.Tk):
         src       = self.raman_processed if self.raman_processed is not None else self.raman_spectra
         col_names = [f"{w:.1f}" for w in self.raman_wavenumbers]
         self.data_X = pd.DataFrame(src, columns=col_names)   # Replace feature matrix in-place
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # Crystalline structure identification
+    # ══════════════════════════════════════════════════════════════════════════
+
+    def _identify_crystal_structure(self):
+        """Identify the most likely crystalline / molecular structure(s) in the
+        loaded Raman spectra by matching detected peaks against the built-in
+        peak catalogue (RAMAN_MATERIALS).
+
+        Algorithm
+        ---------
+        1. Compute mean spectrum from all loaded spectra.
+        2. Normalise to [0, 1]; detect local maxima above threshold.
+        3. Score each material in RAMAN_MATERIALS by weighted-recall
+           (fraction of expected peak amplitude matched within ±TOLERANCE cm⁻¹).
+        4. Display ranked candidates in the Results Summary panel.
+        """
+        print("[Crystal ID] Button clicked")
+
+        try:
+            if self.raman_spectra is None:
+                print("[Crystal ID] No Raman data loaded — aborting")
+                messagebox.showwarning(
+                    "No Data",
+                    "Load a Raman preset or CSV first, then click Identify Crystal Structure.",
+                )
+                return
+
+            src = self.raman_processed if self.raman_processed is not None else self.raman_spectra
+            wn  = self.raman_wavenumbers
+            print(f"[Crystal ID] Data shape: {src.shape}, wn range: {wn[0]:.1f}–{wn[-1]:.1f} cm⁻¹")
+
+            # ── Mean spectrum ──────────────────────────────────────────────────
+            mean_spectrum = src.mean(axis=0)
+
+            # ── Normalise to [0, 1] ───────────────────────────────────────────
+            mn, mx = float(mean_spectrum.min()), float(mean_spectrum.max())
+            print(f"[Crystal ID] Spectrum range: {mn:.4f} – {mx:.4f}")
+            if mx == mn:
+                messagebox.showwarning(
+                    "Flat Spectrum",
+                    "The mean spectrum has no variation — cannot detect peaks.\n"
+                    "Check that data loaded correctly.",
+                )
+                return
+            norm = (mean_spectrum - mn) / (mx - mn)
+
+            # ── Tuning parameters ─────────────────────────────────────────────
+            THRESHOLD   = 0.15   # Minimum normalised intensity
+            TOLERANCE   = 25     # ±cm⁻¹ matching window
+            MIN_DIST_CM = 20     # Minimum cm⁻¹ between peaks
+
+            wn_step      = float(wn[1] - wn[0]) if len(wn) > 1 else 1.0
+            min_dist_pts = max(1, int(MIN_DIST_CM / wn_step))
+            print(f"[Crystal ID] wn_step={wn_step:.2f}, min_dist_pts={min_dist_pts}")
+
+            # ── Peak detection ────────────────────────────────────────────────
+            detected_peaks = []
+
+            if _SCIPY_OK:
+                print("[Crystal ID] Using scipy.signal.find_peaks")
+                indices, _ = _find_peaks(norm, height=THRESHOLD, distance=min_dist_pts)
+                for idx in indices:
+                    detected_peaks.append((float(wn[idx]), float(norm[idx])))
+            else:
+                print("[Crystal ID] scipy not available — using numpy fallback")
+                candidates = []
+                for i in range(1, len(norm) - 1):
+                    if norm[i] >= THRESHOLD and norm[i] > norm[i-1] and norm[i] > norm[i+1]:
+                        candidates.append((float(wn[i]), float(norm[i])))
+                candidates.sort(key=lambda x: -x[1])
+                accepted = []
+                for cand in candidates:
+                    if all(abs(cand[0] - a[0]) >= MIN_DIST_CM for a in accepted):
+                        accepted.append(cand)
+                detected_peaks = sorted(accepted, key=lambda x: x[0])
+
+            print(f"[Crystal ID] Detected {len(detected_peaks)} peaks: "
+                  + ", ".join(f"{w:.0f}" for w, _ in detected_peaks[:10]))
+
+            if not detected_peaks:
+                messagebox.showinfo(
+                    "No Peaks Detected",
+                    f"No peaks above {THRESHOLD*100:.0f}% intensity threshold.\n"
+                    "Try normalising the spectra or applying noise reduction first.",
+                )
+                return
+
+            # ── Score each material (weighted recall) ─────────────────────────
+            results = []
+            for material, peaks in RAMAN_MATERIALS.items():
+                total_weight   = sum(a for _, _, a in peaks)
+                matched_weight = 0.0
+                matched_count  = 0
+                matched_peaks  = []
+
+                for center, width, amp in peaks:
+                    close = [(abs(dpk - center), dpk, di)
+                             for dpk, di in detected_peaks
+                             if abs(dpk - center) <= TOLERANCE]
+                    if close:
+                        close.sort()
+                        _, dpk_wn, _ = close[0]
+                        matched_weight += amp
+                        matched_count  += 1
+                        matched_peaks.append((center, dpk_wn, amp))
+
+                score = matched_weight / total_weight if total_weight > 0 else 0.0
+                results.append((material, score, matched_count, len(peaks), matched_peaks))
+                print(f"[Crystal ID]   {material}: score={score*100:.1f}%  ({matched_count}/{len(peaks)} peaks)")
+
+            results.sort(key=lambda x: -x[1])
+
+            # ── Format results text ───────────────────────────────────────────
+            lines = [
+                "═══ CRYSTAL IDENTIFICATION ═══",
+                f"Spectra averaged : {src.shape[0]}",
+                f"Peaks detected   : {len(detected_peaks)}"
+                f"  (threshold {THRESHOLD*100:.0f}%,  tol ±{TOLERANCE} cm⁻¹)",
+                "",
+                "── Top candidates ──────────────",
+            ]
+
+            BAR_W = 16
+            for rank, (mat, score, matched, total, mpks) in enumerate(results[:5], start=1):
+                filled = int(score * BAR_W)
+                bar    = "█" * filled + "░" * (BAR_W - filled)
+                conf   = "★★★" if score >= 0.80 else ("★★☆" if score >= 0.50 else "★☆☆")
+                lines.append(f"\n#{rank}  {mat}")
+                lines.append(f"    {bar}  {score*100:.1f}%  {conf}")
+                lines.append(f"    Peaks matched: {matched}/{total}")
+                if mpks:
+                    detail = "  ".join(f"{ref:.0f}→{det:.0f}" for ref, det, _ in mpks[:4])
+                    lines.append(f"    {detail}")
+
+            lines += ["", "── Detected peaks ──────────────"]
+            by_intensity = sorted(detected_peaks, key=lambda x: -x[1])
+            for dpk_wn, dpk_int in by_intensity[:12]:
+                lines.append(f"  {dpk_wn:7.1f} cm⁻¹   rel. intensity {dpk_int:.3f}")
+
+            top_name, top_score = results[0][0], results[0][1]
+            if top_score >= 0.50:
+                lines.append(f"\n✓ Best match: {top_name} ({top_score*100:.1f}%)")
+            else:
+                lines.append("\n⚠ No confident match (top score < 50%)")
+                lines.append("  Consider: mixed phase, coating, or unknown material.")
+
+            print(f"[Crystal ID] Best match: {top_name} ({top_score*100:.1f}%)")
+            self._update_stats("\n".join(lines))
+
+        except Exception as exc:
+            import traceback
+            tb = traceback.format_exc()
+            print(f"[Crystal ID] ERROR: {exc}\n{tb}")
+            messagebox.showerror("Identification Error", f"{exc}\n\nSee terminal for details.")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
