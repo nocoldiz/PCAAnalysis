@@ -81,7 +81,7 @@ feature_1,feature_2,feature_3,label
 4.9,3.0,1.4,setosa
 ```
 
-A sample dataset (`Wine.csv`) is included in the repository.
+Sample datasets are in the `datasets/` folder — see `datasets/Wine.csv`.
 
 ## Raman spectroscopy
 
@@ -120,7 +120,16 @@ Silicon_1,0.001,0.003,...,0.000
 Diamond_1,0.000,0.001,...,0.002
 ```
 
-A ready-to-use sample file (`raman_sample.csv`) with 15 spectra (Silicon × 5, Diamond × 5, Graphene × 5) is included in the repository.
+Ready-to-use sample files are in `datasets/`:
+
+| File | Contents |
+|------|----------|
+| `raman_semiconductors.csv` | Silicon × 20, Diamond × 20, Graphene × 20 |
+| `raman_minerals.csv` | Calcite × 20, Quartz × 20, TiO2 (Anatase) × 20 |
+| `raman_polymers.csv` | Polystyrene × 20, PMMA × 20, Polyethylene × 20 |
+| `raman_all_materials.csv` | All 9 materials × 10 spectra each |
+| `raman_sample.csv` | Quick demo: Silicon × 5, Diamond × 5, Graphene × 5 |
+| `Wine.csv` | UCI Wine dataset (general PCA use) |
 
 ### Interactive viewer controls
 
@@ -130,6 +139,42 @@ A ready-to-use sample file (`raman_sample.csv`) with 15 spectra (Silicon × 5, D
 | Normalize | Scale each spectrum to max = 1 |
 | Stack with offset | Separate overlapping spectra vertically |
 | Toolbar (zoom/pan) | Matplotlib navigation toolbar |
+
+## Signal processing
+
+Both tools apply to the loaded Raman spectra and feed the result into the PCA pipeline.  Use **Reset** to revert to the raw data.
+
+### Noise reduction
+
+| Method | Description | Requires scipy |
+|--------|-------------|:--------------:|
+| Savitzky-Golay | Polynomial least-squares fit in a sliding window — best for preserving peak shapes | yes |
+| Gaussian | Gaussian convolution — symmetric, gentle smoothing | yes (numpy fallback available) |
+| Moving Average | Uniform-weight convolution — fastest, may flatten sharp peaks | no |
+| Median | Replaces each point with the local median — ideal for spike / cosmic-ray removal | yes (numpy fallback available) |
+
+Install scipy for best results: `pip install scipy`
+
+### Coating simulation
+
+Simulates the Raman signature of a physical coating applied on top of the substrate material.
+
+**Physical model:**
+```
+I_measured(ν) = I_substrate(ν) × (1 − attenuation × thickness)
+              + I_coating(ν)   ×  thickness
+```
+
+| Coating | Key Raman features |
+|---------|--------------------|
+| **InCrAlC** | DLC D band (~1360 cm⁻¹), G band (~1560 cm⁻¹), Cr-C (~580 cm⁻¹) — PVD hard coating |
+| **Silane** | Si-O-Si bending (450), Si-C stretch (790), Si-O asymmetric (1025 cm⁻¹) |
+| **Wax (Paraffin)** | Long-chain alkane: C-C (1063, 1130), CH₂ sym/asym stretch (2848, 2883 cm⁻¹) |
+| **Wax (Carnauba)** | Ester wax: C=O stretch (1730 cm⁻¹) + alkane skeleton |
+
+Multiple coatings can be checked simultaneously for mixed-layer simulation.  
+The **thickness** slider (0–1) scales coating peak amplitudes.  
+The **attenuation** slider (0–0.9) reduces the fraction of substrate signal that reaches the detector.
 
 ## Jupyter Notebook
 
